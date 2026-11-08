@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""
+Cross-Platform apply_patch utility for SE-AiProxy.
+Works natively on Linux, macOS, and Windows.
+Supports structured block patches, unified diffs, and pure-Python fallback when 'patch' binary is missing.
+"""
+import sys
+import os
+import re
+
+def apply_hunks_pure_python(filepath, diff_text):
+    if not os.path.exists(filepath):
+        added = [l[1:] for l in diff_text.splitlines() if l.startswith('+') and not l.startswith('+++')]
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(added) + '\n')
+        return True
+
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        target_lines = f.read().splitlines()
+
+    hunk_pattern = re.compile(r'^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@')
+    lines = diff_text.splitlines()
+    hunks = []
+    current_hunk = None
+
+    for line in lines:
+        m = hunk_pattern.match(line)
+        if m:
+            if current_hunk:
+                hunks.append(current_hunk)
+            current_hunk = {'lines': []}
+        elif current_hunk is not None:
+            if line.startswith((' ', '-', '+', '\\')):
+                current_hunk['lines'].append(line)
+
+    if current_hunk:
+        hunks.append(current_hunk)
+
+    if not hunks:
+        return False
+
+    new_lines = list(target_lines)
+    for h in hunks:
+        old_slice = []
+        new_slice = []
+        for l in h['lines']:
+            if l.startswith('-'):
+                old_slice.append(l[1:])
+            elif l.startswith('+'):
+                new_slice.append(l[1:])
+            elif l.startswith(' '):
+                old_slice.append(l[1:])
+                new_slice.append(l[1:])
+
+        old_text = '\n'.join(old_slice)
+        full_text = '\n'.join(new_lines)
+        if old_text in full_text:
+            full_text = full_text.replace(old_text, '\n'.join(new_slice), 1)
+            new_lines = full_text.splitlines()
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(new_lines) + '\n')
+    return True
+
+def apply_patch_text(patch_text):
+    if not patch_text:
+        return
+    
+    lines = patch_text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        
+        # Delete File
+        del_match = re.match(r'^(?:\*\*\*\s*)?Delete File:\s*(.+?)(?:\s*\*\*\*)?$', line, re.IGNORECASE)
+        if del_match:
+            filepath = del_match.group(1).strip()
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    print(f"Deleted file: {filepath}")
+                except Exception as e:
+                    print(f"Failed to delete {filepath}: {e}", file=sys.stderr)
+            else:
+                print(f"File not found to delete: {filepath}")
+            i += 1
+            continue
+
+        # Add File
+        add_match = re.match(r'^(?:\*\*\*\s*)?Add File:\s*(.+?)(?:\s*\*\*\*)?$', line, re.IGNORECASE)
+        if add_match:
+            filepath = add_match.group(1).strip()
+            content_lines = []
+            i += 1
+            while i < len(lines):
+                if re.match(r'^(?:\*\*\*\s*)?(?:Add File|Delete File|Update File|End Patch)', lines[i], re.IGNORECASE):
+                    break
+                curr = lines[i]
+                if curr.startswith('+'):
+                    content_lines.append(curr[1:])
+                else:
+                    content_lines.append(curr)
+                i += 1
+            os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(content_lines) + '\n')
+            print(f"Added file: {filepath}")
+            continue
+
+        # Update File
+        upd_match = re.match(r'^(?:\*\*\*\s*)?Update File:\s*(.+?)(?:\s*\*\*\*)?$', line, re.IGNORECASE)
+        if upd_match:
+            filepath = upd_match.group(1).strip()
+            diff_lines = []
+            i += 1
+            while i < len(lines):
+                if re.match(r'^(?:\*\*\*\s*)?(?:Add File|Delete File|Update File|End Patch)', lines[i], re.IGNORECASE):
+                    break
+                diff_lines.append(lines[i])
+                i += 1
+            
+            diff_text = '\n'.join(diff_lines)
+            applied = False
+            try:
+                import subprocess
+                p = subprocess.run(['patch', '-p0'], input=diff_text, text=True, capture_output=True)
+                if p.returncode == 0:
+                    print(f"Updated file: {filepath}")
+                    applied = True
+            except Exception:
+                pass
+
+            if not applied:
+                try:
+                    if apply_hunks_pure_python(filepath, diff_text):
+                        print(f"Updated file: {filepath}")
+                    else:
+                        print(f"Warning: could not apply diff cleanly to {filepath}", file=sys.stderr)
+                except Exception as e:
+                    print(f"Update failed for {filepath}: {e}", file=sys.stderr)
+            continue
+
+        i += 1
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] not in ('-', '--'):
+        with open(sys.argv[1], 'r', encoding='utf-8') as f:
+            patch_text = f.read()
+    else:
+        patch_text = sys.stdin.read()
+    
+    apply_patch_text(patch_text)
+
+if __name__ == '__main__':
+    main()

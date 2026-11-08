@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SE-AiProxy</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-2: #f0f2f5;
+      --border: #dfe3e8;
+      --border-strong: #c6ccd4;
+      --text: #1d2329;
+      --muted: #66707a;
+      --accent: #2463eb;
+      --accent-soft: #e8effd;
+      --ok: #1a7f4b;
+      --ok-soft: #e3f4ea;
+      --warn: #a15c00;
+      --warn-soft: #fbf0dc;
+      --err: #c2352b;
+      --err-soft: #fbe6e4;
+      --code-bg: #f3f4f6;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+      --shadow-lg: 0 12px 32px rgba(16, 24, 40, .18);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111418;
+        --surface: #181c21;
+        --surface-2: #1f242a;
+        --border: #2b3138;
+        --border-strong: #3a424b;
+        --text: #e3e7eb;
+        --muted: #8d97a2;
+        --accent: #6b9cff;
+        --accent-soft: #1d2a44;
+        --ok: #4cc286;
+        --ok-soft: #173126;
+        --warn: #e0a64a;
+        --warn-soft: #362a15;
+        --err: #f0766b;
+        --err-soft: #3a1d1b;
+        --code-bg: #14181c;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+        --shadow-lg: 0 12px 32px rgba(0, 0, 0, .55);
+        color-scheme: dark;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    code, .mono { font-family: var(--mono); font-size: 12.5px; }
+    a { color: var(--accent); }
+
+    /* ── Top bar ── */
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      max-width: 1180px; margin: 0 auto; padding: 0 16px;
+      display: flex; align-items: center; gap: 16px; height: 52px;
+    }
+    .brand { font-weight: 650; font-size: 15px; white-space: nowrap; }
+    .brand small { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 12px; }
+    .tabs { display: flex; gap: 2px; height: 100%; overflow-x: auto; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab {
+      background: none; border: 0; padding: 0 12px; height: 100%; cursor: pointer;
+      color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap;
+    }
+    .tab:hover { color: var(--text); }
+    .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 550; }
+    .pool-state { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.err { background: var(--err); }
+
+    main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 64px; }
+    section[hidden] { display: none; }
+    .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .section-head h1 { font-size: 18px; margin: 0; font-weight: 650; }
+    .section-head p { margin: 2px 0 0; color: var(--muted); }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+    .panel + .panel { margin-top: 16px; }
+    .panel-body { padding: 16px; }
+    .panel h2 { font-size: 14px; margin: 0 0 2px; font-weight: 650; }
+    .panel .sub { color: var(--muted); margin: 0 0 14px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      height: 32px; padding: 0 12px; border-radius: 6px; cursor: pointer;
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--surface-2); }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { filter: brightness(1.07); }
+    .btn.danger { color: var(--err); }
+    .btn.danger:hover { background: var(--err-soft); }
+    .btn.sm { height: 28px; padding: 0 9px; font-size: 13px; }
+    .btn.icon { width: 28px; padding: 0; }
+    .btn.ghost { border-color: transparent; background: transparent; }
+    .btn.ghost:hover { background: var(--surface-2); }
+
+    /* ── Forms ── */
+    label.field { display: block; }
+    .field > span { display: block; font-size: 13px; font-weight: 550; margin-bottom: 4px; }
+    .field .hint { display: block; color: var(--muted); font-size: 12.5px; margin-top: 4px; font-weight: 400; }
+    input[type=text], input[type=number], input[type=password], select, textarea {
+      width: 100%; height: 34px; padding: 0 10px; border-radius: 6px;
+      border: 1px solid var(--border-strong); background: var(--surface);
+    }
+    textarea { height: auto; padding: 8px 10px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+    .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+    .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+    /* ── Status chips ── */
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px;
+      border-radius: 11px; font-size: 12px; font-weight: 550; white-space: nowrap;
+      background: var(--surface-2); color: var(--muted);
+    }
+    .chip.ok { background: var(--ok-soft); color: var(--ok); }
+    .chip.warn { background: var(--warn-soft); color: var(--warn); }
+    .chip.err { background: var(--err-soft); color: var(--err); }
+    .chip.info { background: var(--accent-soft); color: var(--accent); }
+    .muted { color: var(--muted); }
+    .small { font-size: 12.5px; }
+    .trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── Accounts list ── */
+    .acc-list { overflow: hidden; }
+    .acc-row {
+      display: grid; align-items: center; gap: 12px; padding: 10px 16px;
+      grid-template-columns: minmax(170px, 2fr) minmax(120px, 1.4fr) 92px minmax(130px, 1.3fr) 80px 110px 150px;
+      border-top: 1px solid var(--border);
+    }
+    .acc-row.head { border-top: 0; color: var(--muted); font-size: 12px; font-weight: 550; padding-top: 9px; padding-bottom: 9px; background: var(--surface-2); }
+    .acc-row:not(.head) { cursor: pointer; }
+    .acc-row:not(.head):hover { background: var(--surface-2); }
+    .acc-row.off { opacity: .6; }
+    .acc-name { font-weight: 600; }
+    .acc-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .acc-error { color: var(--muted); font-size: 12px; margin-top: 3px; max-width: 100%; }
+    .cell-label { display: none; }
+    .empty { padding: 32px 16px; text-align: center; color: var(--muted); }
+
+    @media (max-width: 900px) {
+      .acc-row.head { display: none; }
+      .acc-row { grid-template-columns: 1fr 1fr; gap: 8px 16px; padding: 14px 16px; }
+      .acc-row > .c-name { grid-column: 1 / -1; }
+      .acc-row > .c-actions { grid-column: 1 / -1; }
+      .acc-actions { justify-content: flex-start; }
+      .cell-label { display: block; color: var(--muted); font-size: 11.5px; }
+    }
+
+    .notice { border-radius: 6px; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface-2); margin-bottom: 14px; }
+    .notice.ok { background: var(--ok-soft); border-color: transparent; }
+    .notice.warn { background: var(--warn-soft); border-color: transparent; }
+    .notice.err { background: var(--err-soft); border-color: transparent; }
+    .notice ul { margin: 6px 0 0; padding-left: 18px; }
+
+    /* ── Simple tables ── */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 9px 16px; border-top: 1px solid var(--border); vertical-align: middle; }
+    th { font-size: 12px; font-weight: 550; color: var(--muted); background: var(--surface-2); border-top: 0; }
+    .table-wrap { overflow-x: auto; }
+
+    /* ── Code ── */
+    .code {
+      position: relative; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-all;
+    }
+    .code-line { display: flex; gap: 8px; align-items: flex-start; }
+    .code-line .code { flex: 1; }
+    .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; }
+    .seg button { border: 0; background: var(--surface); padding: 0 10px; height: 28px; cursor: pointer; font-size: 13px; color: var(--muted); }
+    .seg button + button { border-left: 1px solid var(--border-strong); }
+    .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 550; }
+
+    /* ── Drawer & dialogs ── */
+    dialog { border: 0; padding: 0; background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
+    dialog::backdrop { background: rgba(10, 14, 20, .45); }
+    dialog.drawer {
+      margin: 0 0 0 auto; height: 100vh; max-height: 100vh; width: min(620px, 100vw); max-width: 100vw;
+      border-left: 1px solid var(--border);
+    }
+    dialog.modal { width: min(560px, calc(100vw - 32px)); border-radius: 10px; border: 1px solid var(--border); }
+    .dlg { display: flex; flex-direction: column; height: 100%; }
+    .dlg-head { padding: 16px 20px 12px; border-bottom: 1px solid var(--border); }
+    .dlg-head h2 { margin: 0; font-size: 16px; font-weight: 650; }
+    .dlg-head .row { justify-content: space-between; flex-wrap: nowrap; }
+    .dlg-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+    .dlg-foot { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+    .subtabs { display: flex; gap: 2px; margin-top: 12px; margin-bottom: -13px; }
+    .subtabs .tab { height: 34px; }
+
+    .key-row { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+    .key-row:first-child { border-top: 0; }
+    .key-num { width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); color: var(--muted); display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+    .key-row.current .key-num { background: var(--accent); color: #fff; }
+    .key-actions { display: flex; gap: 4px; }
+    .replace-box { grid-column: 2 / -1; display: flex; gap: 8px; }
+    .danger-zone { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+    /* ── Toasts ── */
+    #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+    .toast { background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 6px; box-shadow: var(--shadow-lg); max-width: min(560px, calc(100vw - 32px)); pointer-events: auto; }
+    .toast.err { background: var(--err); color: #fff; }
+
+    .settings-section + .settings-section { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+    .settings-section h3 { margin: 0 0 2px; font-size: 13.5px; font-weight: 650; }
+    .settings-section > p { margin: 0 0 12px; color: var(--muted); }
+    .approx { color: var(--muted); font-size: 12px; margin-top: 3px; min-height: 18px; }
+    .save-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 8px 8px; }
+
+    @media (max-width: 640px) {
+      .topbar-inner { flex-wrap: wrap; height: auto; padding-top: 8px; gap: 4px 12px; }
+      .tabs { order: 3; width: 100%; height: 40px; }
+      .pool-state { margin-left: auto; }
+    }
+    .site-footer { max-width: 1100px; margin: 24px auto 32px; padding: 0 16px; text-align: center; font-size: 12px; color: var(--muted); }
+    .site-footer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+    .site-footer a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">SE-AiProxy<small id="version"></small></div>
+      <nav class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="accounts">Accounts</button>
+        <button class="tab" role="tab" data-tab="access">Access keys</button>
+        <button class="tab" role="tab" data-tab="connect">Connect</button>
+        <button class="tab" role="tab" data-tab="settings">Settings</button>
+      </nav>
+      <div class="pool-state" title="Accounts that can take a request right now"><span class="dot" id="poolDot"></span><span id="poolText">Loading…</span></div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ───────── Accounts ───────── -->
+    <section id="tab-accounts">
+      <div class="section-head">
+        <div>
+          <h1>Accounts</h1>
+          <p>Requests go to the lowest priority number first. If an account fails, the next one takes over.</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn" id="btnBookmarklet" title="Copies a bookmark that sends your DeepSeek login token to this proxy">DeepSeek bookmarklet</button>
+          <button class="btn" id="btnTestAll">Test all</button>
+          <button class="btn primary" id="btnAddAccount">Add account</button>
+        </div>
+      </div>
+      <div id="testAllResult"></div>
+      <div class="panel acc-list" id="accList"><div class="empty">Loading…</div></div>
+    </section>
+
+    <!-- ───────── Access keys ───────── -->
+    <section id="tab-access" hidden>
+      <div class="section-head">
+        <div>
+          <h1>Access keys</h1>
+          <p>Keys your clients use to talk to this proxy. Codex keys start with <code>sk-proxy-</code>, Claude Code keys with <code>sk-ant-api03-</code>.</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Key</th><th>For</th><th>Created</th><th></th></tr></thead>
+            <tbody id="proxyKeysBody"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <form class="panel-body" id="newKeyForm" autocomplete="off">
+          <h2>New key</h2>
+          <p class="sub">The full key is shown in the list above and can be copied any time.</p>
+          <div class="row">
+            <input type="text" id="newKeyLabel" placeholder="Name, e.g. Laptop" style="flex: 1; min-width: 180px;">
+            <select id="newKeyType" style="width: auto;">
+              <option value="codex">Codex</option>
+              <option value="anthropic">Claude Code</option>
+            </select>
+            <button class="btn primary" type="submit">Create</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ───────── Connect ───────── -->
+    <section id="tab-connect" hidden>
+      <div class="section-head">
+        <div>
+          <h1>Connect a client</h1>
+          <p>Point Codex or Claude Code at this proxy.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-body">
+          <h2>Server address</h2>
+          <p class="sub">Used in the snippets below. Change it if clients reach this machine by another IP or name.</p>
+          <div class="row">
+            <label class="field" style="flex: 2; min-width: 180px;"><span>Host</span><input type="text" id="hostInput"></label>
+            <label class="field" style="width: 110px;"><span>HTTP port</span><input type="number" id="portInput"></label>
+            <label class="field" style="width: 110px;"><span>HTTPS port</span><input type="number" id="httpsPortInput" value="18790"></label>
+            <button class="btn" id="btnResetHost" style="align-self: flex-end;">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-body">
+          <div class="row" style="justify-content: space-between; margin-bottom: 14px;">
+            <div class="seg" id="clientSeg">
+              <button data-client="codex" aria-pressed="true">Codex</button>
+              <button data-client="claude" aria-pressed="false">Claude Code</button>
+            </div>
+          </div>
+
+          <div id="clientCodex">
+            <p class="sub">Codex talks to <code id="codexBase"></code> using the Responses API.</p>
+            <div id="remoteSetup" hidden>
+              <div class="row" style="justify-content: space-between; margin-bottom: 6px;">
+                <strong class="small">One-line setup for another computer</strong>
+                <div class="seg" id="remoteOsSeg">
+                  <button data-os="linux" aria-pressed="true">Linux / macOS</button>
+                  <button data-os="win" aria-pressed="false">Windows</button>
+                </div>
+              </div>
+              <div class="code-line" style="margin-bottom: 14px;">
+                <div class="code" id="remoteCmd"></div>
+                <button class="btn sm" data-copy="remoteCmd">Copy</button>
+              </div>
+            </div>
+            <div class="row" style="justify-content: space-between; margin-bottom: 6px;">
+              <strong class="small">~/.codex/config.toml</strong>
+              <div class="row">
+                <button class="btn sm" data-copy="tomlPreview">Copy</button>
+                <button class="btn sm" id="btnDownloadToml">Download</button>
+                <button class="btn sm primary" id="btnApplyCodex">Write to this machine</button>
+              </div>
+            </div>
+            <div class="code" id="tomlPreview">Loading…</div>
+            <p class="muted small" style="margin: 8px 0 0;">The API key goes in the <code>CODEX_PROXY_KEY</code> environment variable. “Write to this machine” sets both the config and <code>~/.codex/.env</code> on the computer running the proxy.</p>
+          </div>
+
+          <div id="clientClaude" hidden>
+            <p class="sub">Claude Code talks to <code>/anthropic</code> using the Messages API.</p>
+            <div class="grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 14px;">
+              <div class="field">
+                <span>Connection</span>
+                <div class="seg" id="claudeModeSeg">
+                  <button data-mode="https" aria-pressed="true">HTTPS (port <span class="httpsPortText"></span>)</button>
+                  <button data-mode="loopback" aria-pressed="false">HTTP via 127.0.0.1</button>
+                </div>
+                <span class="hint">HTTPS works across the network. Use the second option only if you forward the port locally.</span>
+              </div>
+              <div class="field">
+                <span>Shell</span>
+                <div class="seg" id="claudeOsSeg">
+                  <button data-os="win" aria-pressed="true">PowerShell</button>
+                  <button data-os="cmd" aria-pressed="false">CMD</button>
+                  <button data-os="linux" aria-pressed="false">bash / zsh</button>
+                </div>
+              </div>
+            </div>
+            <div class="code-line">
+              <div class="code" id="claudeCmd"></div>
+              <button class="btn sm" data-copy="claudeCmd">Copy</button>
+            </div>
+            <div id="netshBox" hidden style="margin-top: 12px;">
+              <strong class="small">Port forward on Windows (run once as Administrator)</strong>
+              <div class="code-line" style="margin-top: 6px;">
+                <div class="code" id="netshCmd"></div>
+                <button class="btn sm" data-copy="netshCmd">Copy</button>
+              </div>
+            </div>
+            <div class="notice warn" id="noClaudeKey" hidden style="margin: 12px 0 0;">There is no Claude Code key yet. Create one on the Access keys tab and it will appear here.</div>
+            <p class="muted small" style="margin: 10px 0 0;"><code>CLAUDE_CODE_SIMPLE=1</code> skips the browser login. Run <code>/status</code> inside Claude Code to check the connection.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── Settings ───────── -->
+    <section id="tab-settings" hidden>
+      <div class="section-head">
+        <div>
+          <h1>Settings</h1>
+          <p>Proxy settings apply from the next request. No restart needed.</p>
+        </div>
+      </div>
+      <form class="panel" id="settingsForm" autocomplete="off">
+        <div class="panel-body">
+          <div class="settings-section">
+            <div class="row" style="justify-content: space-between;">
+              <h3>Codex context</h3>
+              <div class="row">
+                <button type="button" class="btn sm" data-preset="128k">128K preset</button>
+                <button type="button" class="btn sm" data-preset="1m">1M preset</button>
+              </div>
+            </div>
+            <p>Written to <code>~/.codex/config.toml</code>. Controls when Codex compacts its own history.</p>
+            <div class="grid">
+              <label class="field"><span>Context window (tokens)</span><input type="number" name="contextWindow" step="1000"><div class="approx" data-approx="tokens"></div></label>
+              <label class="field"><span>Auto-compact at (tokens)</span><input type="number" name="autoCompactLimit" step="1000"><div class="approx" data-approx="tokens"></div><span class="hint">Must be lower than the context window.</span></label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Web chat sessions</h3>
+            <p>How much history the proxy keeps in one DeepSeek or Kimi chat.</p>
+            <div class="grid">
+              <label class="field"><span>Start a new chat after (characters)</span><input type="number" name="sessionRotateChars" step="10000"><div class="approx" data-approx="chars"></div></label>
+              <label class="field"><span>History sent to a new chat (characters)</span><input type="number" name="fullPromptMaxChars" step="10000"><div class="approx" data-approx="chars"></div><span class="hint">Older steps are dropped past this size.</span></label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Web account pacing</h3>
+            <p>Applies to each DeepSeek and Kimi web account. API providers are not affected. <strong>0 means no limit.</strong></p>
+            <div class="grid">
+              <label class="field"><span>Gap between requests (s)</span><input type="number" name="webMinIntervalSec" step="1"></label>
+              <label class="field"><span>Extra random gap, up to (s)</span><input type="number" name="webJitterSec" step="1"></label>
+              <label class="field"><span>Requests per minute</span><input type="number" name="webMaxPerMinute" step="1"></label>
+              <label class="field"><span>Requests per hour</span><input type="number" name="webMaxPerHour" step="5"></label>
+              <label class="field"><span>Requests per day</span><input type="number" name="webMaxPerDay" step="10"><span class="hint">Survives restarts.</span></label>
+              <label class="field"><span>New chats per hour</span><input type="number" name="webMaxSessionsPerHour" step="1"></label>
+            </div>
+          </div>
+        </div>
+        <div class="save-bar">
+          <button class="btn primary" type="submit">Save</button>
+          <button class="btn" type="button" id="btnSaveApply">Save and update Codex config</button>
+          <span class="muted small" id="settingsDirty"></span>
+          <button class="btn ghost" type="button" id="btnLogs" style="margin-left: auto;">Download log</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    SE-AiProxy — developed &amp; provided by <a href="https://shirazelectronic.ir" target="_blank" rel="noopener">shirazelectronic</a>
+    · <a href="https://shirazelectronic.ir" target="_blank" rel="noopener">shirazelectronic.ir</a>
+  </footer>
+
+  <!-- ───────── Account drawer ───────── -->
+  <dialog class="drawer" id="accDrawer">
+    <div class="dlg">
+      <div class="dlg-head">
+        <div class="row">
+          <div style="min-width: 0;">
+            <h2 class="trunc" id="drLabel"></h2>
+            <div class="muted small trunc" id="drMeta"></div>
+          </div>
+          <div class="row" style="flex: none;">
+            <button class="btn sm" id="drTest">Test</button>
+            <button class="btn sm ghost" id="drClose" aria-label="Close">Close</button>
+          </div>
+        </div>
+        <div id="drStatus" style="margin-top: 10px;"></div>
+        <div class="subtabs" role="tablist">
+          <button class="tab" data-drtab="keys" aria-selected="true">Keys</button>
+          <button class="tab" data-drtab="details" aria-selected="false">Details</button>
+        </div>
+      </div>
+      <div class="dlg-body">
+        <div id="drKeys">
+          <p class="muted" style="margin-top: 0;">The highlighted key is in use. If it fails or hits a limit, the next key in the list takes over. The account is skipped only when every key is down.</p>
+          <div id="drKeyList"></div>
+          <form id="drAddKeys" style="margin-top: 16px;" autocomplete="off">
+            <label class="field">
+              <span>Add keys</span>
+              <textarea id="drNewKeys" rows="3" spellcheck="false" placeholder="One key per line"></textarea>
+              <span class="hint">Each key is tested before it is added.</span>
+            </label>
+            <div class="row" style="justify-content: flex-end; margin-top: 8px;"><button class="btn primary" type="submit" id="drAddKeysBtn">Add</button></div>
+          </form>
+        </div>
+
+        <form id="drDetails" hidden autocomplete="off">
+          <div class="grid" style="grid-template-columns: 1fr 1fr;">
+            <label class="field" style="grid-column: 1 / -1;"><span>Name</span><input type="text" id="edLabel"></label>
+            <div class="field" style="grid-column: 1 / -1;"><span>Model</span>
+              <div class="row" style="flex-wrap: nowrap;">
+                <input type="text" id="edModel" list="edModelList" spellcheck="false">
+                <select id="edModelSelect" hidden></select>
+                <button type="button" class="btn" id="edLoadModels" title="Ask the provider which models this key can use">Load models</button>
+              </div>
+              <datalist id="edModelList"></datalist>
+            </div>
+            <label class="field"><span>Priority</span><input type="number" id="edPriority" min="1" max="99"><span class="hint">1 is tried first.</span></label>
+            <label class="field"><span>Role</span>
+              <select id="edRole"></select>
+              <span class="hint">Which part of the work this account takes.</span>
+            </label>
+            <label class="field" data-api-only><span>Requests per minute</span><input type="number" id="edRpm" min="0"><span class="hint">Per key. 0 means no limit.</span></label>
+            <label class="field" data-api-only><span>Requests per day</span><input type="number" id="edRpd" min="0"></label>
+            <label class="field" style="grid-column: 1 / -1;" id="edBaseUrlField"><span>Base URL</span><input type="text" id="edBaseUrl" placeholder="https://…"></label>
+            <label class="switch" style="grid-column: 1 / -1;"><input type="checkbox" id="edEnabled"> Use this account</label>
+          </div>
+          <div class="row" style="justify-content: flex-end; margin-top: 16px;"><button class="btn primary" type="submit" id="edSave">Save</button></div>
+          <div class="danger-zone">
+            <div><strong>Remove account</strong><div class="muted small">Its keys are deleted from the proxy.</div></div>
+            <button type="button" class="btn danger" id="edDelete">Remove</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ───────── Add account ───────── -->
+  <dialog class="modal" id="addDialog">
+    <form class="dlg" id="addForm" autocomplete="off">
+      <div class="dlg-head"><h2>Add account</h2></div>
+      <div class="dlg-body">
+        <div class="grid" style="grid-template-columns: 1fr 1fr;">
+          <label class="field" style="grid-column: 1 / -1;"><span>Provider</span><select id="adType"></select></label>
+          <label class="field" style="grid-column: 1 / -1;"><span>Name</span><input type="text" id="adLabel" placeholder="Optional"></label>
+          <label class="field" style="grid-column: 1 / -1;" id="adBaseUrlField" hidden><span>Base URL</span><input type="text" id="adBaseUrl" placeholder="https://api.example.com/v1"></label>
+          <label class="field" style="grid-column: 1 / -1;"><span id="adKeyLabel">API key</span>
+            <input type="password" id="adKey" autocomplete="new-password" spellcheck="false">
+            <span class="hint" id="adKeyHint"></span>
+          </label>
+          <div class="field" style="grid-column: 1 / -1;"><span>Model</span>
+            <div class="row" style="flex-wrap: nowrap;">
+              <input type="text" id="adModel" list="adModelList" spellcheck="false">
+              <select id="adModelSelect" hidden></select>
+              <button type="button" class="btn" id="adLoadModels" title="Ask the provider which models this key can use">Load models</button>
+            </div>
+            <datalist id="adModelList"></datalist>
+          </div>
+          <label class="field"><span>Priority</span><input type="number" id="adPriority" min="1" max="99"></label>
+          <label class="field"><span>Role</span><select id="adRole"></select></label>
+          <label class="field" data-api-only><span>Requests per minute</span><input type="number" id="adRpm" min="0" placeholder="0"><span class="hint">Per key. 0 means no limit.</span></label>
+          <label class="field" data-api-only><span>Requests per day</span><input type="number" id="adRpd" min="0" placeholder="0"><span class="hint">The key rests before the provider refuses.</span></label>
+          <details style="grid-column: 1 / -1;">
+            <summary class="small" style="cursor: pointer;">Backup keys</summary>
+            <textarea id="adExtraKeys" rows="3" spellcheck="false" placeholder="One key per line" style="margin-top: 8px;"></textarea>
+            <span class="hint small muted">Used in order when the main key stops working.</span>
+          </details>
+        </div>
+        <div id="adError" style="margin-top: 14px;"></div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="btn" id="adCancel">Cancel</button>
+        <button type="submit" class="btn primary" id="adSubmit">Test and add</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" aria-live="polite"></div>
+
+  <script>
+  (() => {
+    'use strict';
+
+    // ── Small helpers ──────────────────────────────────────────────
+    const $ = (sel, root = document) => root.querySelector(sel);
+    const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+    const esc = v => String(v ?? '').replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+    };
+
+    function toast(msg, isError = false) {
+      const el = document.createElement('div');
+      el.className = 'toast' + (isError ? ' err' : '');
+      el.textContent = msg;
+      $('#toasts').appendChild(el);
+      setTimeout(() => el.remove(), isError ? 6000 : 3000);
+    }
+
+    async function copyText(text, btn) {
+      try {
+        await navigator.clipboard.writeText(text);
+        if (btn) { const old = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = old; }, 1500); }
+        else toast('Copied');
+      } catch {
+        window.prompt('Copy this:', text);
+      }
+    }
+
+    function fmtDuration(ms) {
+      const s = Math.max(0, Math.ceil(ms / 1000));
+      if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+      if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
+      return `${s}s`;
+    }
+
+    function fmtCount(n) {
+      if (!Number.isFinite(n) || n <= 0) return '';
+      if (n >= 1e6) return (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 2).replace(/\.?0+$/, '') + 'M';
+      if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+      return String(n);
+    }
+
+    function timeAgo(ts) {
+      if (!ts) return 'never';
+      const s = Math.round((Date.now() - ts) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+      return `${Math.floor(s / 86400)} d ago`;
+    }
+
+    // All /api calls. Remote access needs the admin key; it is asked for once and remembered.
+    async function api(path, { method = 'GET', body, raw = false } = {}) {
+      const opts = { method, headers: {} };
+      if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+      const adminKey = store.get('adminKey');
+      if (adminKey) opts.headers['x-admin-key'] = adminKey;
+      let res = await fetch(path, opts);
+      if (res.status === 401) {
+        const b = await res.clone().json().catch(() => ({}));
+        if (b?.error?.code === 'admin_auth_required') {
+          const entered = window.prompt('Admin key (adminKey in data/config.json on the server):');
+          if (entered) {
+            store.set('adminKey', entered.trim());
+            opts.headers['x-admin-key'] = entered.trim();
+            res = await fetch(path, opts);
+          }
+        }
+      }
+      const isJson = (res.headers.get('content-type') || '').includes('json');
+      const data = isJson ? await res.json().catch(() => ({})) : await res.text();
+      if (raw) return data;
+      if (!res.ok || (isJson && data && data.error)) {
+        const e = data?.error;
+        throw new Error((typeof e === 'string' ? e : e?.message) || `HTTP ${res.status}`);
+      }
+      return data;
+    }
+
+    // ── Providers ──────────────────────────────────────────────────
+    let PROVIDERS = {
+      kimi_web:      { name: 'Kimi', kind: 'web account', model: 'instant', priority: 1, keyLabel: 'refresh_token', keyHint: 'On kimi.ai open DevTools → Application → Local Storage and copy refresh_token.', placeholder: 'eyJhbGciOi…' },
+      deepseek_web:  { name: 'DeepSeek', kind: 'web account', model: 'deepseek-reasoner', priority: 4, keyLabel: 'userToken', keyHint: 'On chat.deepseek.com open DevTools → Application → Local Storage and copy userToken. The bookmarklet does this for you.', placeholder: '' },
+      deepseek_api:  { name: 'DeepSeek API (official)', kind: 'API', model: 'deepseek-flash', priority: 1, keyLabel: 'API key', keyHint: 'Create a key at platform.deepseek.com → API keys. Paid per token; no human checks. Models: deepseek-flash or deepseek-v4-pro.', placeholder: 'sk-…' },
+      openai:        { name: 'OpenAI API (official)', kind: 'API', model: 'gpt-5-mini', priority: 1, keyLabel: 'API key', keyHint: 'Create a key at platform.openai.com → API keys. Paid per token. Use "Load models" to pick any model your key can use.', placeholder: 'sk-proj-…' },
+      anthropic:     { name: 'Anthropic API (official)', kind: 'API', model: 'claude-opus-5-5', priority: 1, keyLabel: 'API key', keyHint: 'Create a key at platform.claude.com → API keys. Paid per token. Requests are translated to the Anthropic Messages API (tools, images and streaming included).', placeholder: 'sk-ant-api03-…' },
+      moonmath:      { name: 'Moonmath', kind: 'API', model: 'deepseek-v4.1-flash', priority: 1, keyLabel: 'API key', placeholder: 'sk-…' },
+      tokenharbor:   { name: 'TokenHarbor', kind: 'API', model: 'deepseek-v4.1-flash:free', priority: 2, keyLabel: 'API key', placeholder: 'thk_live_…' },
+      nvidia:        { name: 'NVIDIA NIM', kind: 'API', model: 'deepseek-ai/deepseek-v4.1-flash', priority: 2, keyLabel: 'API key', placeholder: 'nvapi-…' },
+      chabokan:      { name: 'Chabokan', kind: 'API', model: 'deepseek/deepseek-v4.1-flash-1017', priority: 3, keyLabel: 'API key', placeholder: 'sk-chbk-…' },
+      google:        { name: 'Google Gemini', kind: 'API', model: 'gemini-3-flash-preview', priority: 3, keyLabel: 'API key', placeholder: 'AIza…' },
+      openrouter:    { name: 'OpenRouter', kind: 'API', model: 'nvidia/nemotron-3.5-lightning:free', priority: 1, keyLabel: 'API key', placeholder: 'sk-or-v1-…' },
+      cloudflare:    { name: 'Cloudflare Workers AI', kind: 'API', keyLabel: 'API token', keyHint: 'Replace ACCOUNT_ID in the base URL with your account id (Cloudflare dashboard → Workers AI).', needsBaseUrl: true },
+      groq:          { name: 'Groq', kind: 'API', keyLabel: 'API key', keyHint: 'The free tier allows about 8K tokens a minute, so long histories get shortened. Works best as a helper (Prompt writing or Debugging).' },
+      openai_custom: { name: 'OpenAI-compatible', kind: 'API', model: 'deepseek-chat', priority: 5, keyLabel: 'API key', placeholder: 'sk-…', needsBaseUrl: true }
+    };
+    const provider = type => PROVIDERS[type] || PROVIDERS.openai_custom;
+
+    // Presets live on the server; local entries only add wording for the key field
+    async function loadPresets() {
+      try {
+        const presets = await api('/api/provider-presets');
+        const merged = {};
+        for (const [type, p] of Object.entries(presets)) {
+          const local = PROVIDERS[type] || {};
+          merged[type] = {
+            name: local.name || p.name,
+            kind: isWeb(type) ? 'web account' : 'API',
+            model: p.model || local.model || '',
+            priority: p.priority ?? local.priority ?? 3,
+            keyLabel: local.keyLabel || 'API key',
+            keyHint: local.keyHint || '',
+            placeholder: local.placeholder || p.placeholder || '',
+            needsBaseUrl: Boolean(local.needsBaseUrl || p.needsBaseUrl),
+            baseUrl: p.baseUrl || '',
+            rpm: p.rpm || 0,
+            rpd: p.rpd || 0
+          };
+        }
+        // Familiar providers first, then the rest by name, custom last
+        const order = ['kimi_web', 'deepseek_web', 'deepseek_api', 'openai', 'anthropic', 'nvidia', 'chabokan', 'moonmath', 'tokenharbor', 'openrouter', 'google'];
+        const rest = Object.keys(merged).filter(t => !order.includes(t) && t !== 'openai_custom').sort((a, b) => merged[a].name.localeCompare(merged[b].name));
+        PROVIDERS = Object.fromEntries([...order, ...rest, 'openai_custom'].filter(t => merged[t]).map(t => [t, merged[t]]));
+      } catch {}
+      fillProviderSelect();
+    }
+    function fillProviderSelect() {
+      $('#adType').innerHTML = Object.entries(PROVIDERS).map(([v, p]) => `<option value="${v}">${esc(p.name)} (${p.kind})</option>`).join('');
+    }
+    const isWeb = type => type === 'deepseek_web' || type === 'kimi_web';
+
+    // Web accounts only accept a fixed set of models
+    const WEB_MODELS = {
+      kimi_web: [['instant', 'Instant (k2d6-chat, with thinking)'], ['k3', 'K3 (strongest, often busy on free accounts)'], ['k28', 'K2.8 preview']],
+      deepseek_web: [['deepseek-reasoner', 'deepseek-reasoner (DeepThink)'], ['deepseek-chat', 'deepseek-chat (no thinking, faster)']]
+    };
+
+    const ROLES = [['all', 'Everything'], ['work', 'Main work'], ['prompt', 'Prompt writing'], ['debug', 'Debugging']];
+    const roleName = r => (ROLES.find(([v]) => v === r) || ROLES[0])[1];
+
+    function fillModelPicker(prefix, type, value) {
+      const input = $(`#${prefix}Model`);
+      const select = $(`#${prefix}ModelSelect`);
+      const choices = WEB_MODELS[type];
+      const loadBtn = $(`#${prefix}LoadModels`);
+      if (loadBtn) loadBtn.hidden = Boolean(choices);
+      if (!choices) {
+        select.hidden = true; input.hidden = false;
+        input.value = value ?? input.value;
+        return;
+      }
+      const current = value || choices[0][0];
+      const known = choices.some(([v]) => v === current);
+      select.innerHTML = choices.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')
+        + (known ? '' : `<option value="${esc(current)}">${esc(current)}</option>`);
+      select.value = current;
+      input.value = current;
+      input.hidden = true; select.hidden = false;
+    }
+    $('#adModelSelect').addEventListener('change', e => { $('#adModel').value = e.target.value; });
+    $('#edModelSelect').addEventListener('change', e => { $('#edModel').value = e.target.value; });
+
+    for (const sel of ['#adRole', '#edRole']) $(sel).innerHTML = ROLES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+    fillProviderSelect();
+
+    // ── State ──────────────────────────────────────────────────────
+    let accounts = [];
+    let proxyKeys = [];
+    let settings = {};
+    let schema = {};
+    let openAccountId = null;
+
+    // ── Tabs ───────────────────────────────────────────────────────
+    function showTab(name) {
+      if (!$(`#tab-${name}`)) name = 'accounts';
+      for (const t of $$('.tabs .tab')) t.setAttribute('aria-selected', String(t.dataset.tab === name));
+      for (const s of $$('main > section')) s.hidden = s.id !== `tab-${name}`;
+      store.set('tab', name);
+      if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+      if (name === 'connect') refreshToml();
+    }
+    $$('.tabs .tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+    // ── Account status ─────────────────────────────────────────────
+    function accountState(a, now = Date.now()) {
+      if (a.hasToken === false) return { cls: 'warn', text: 'No key', note: 'Add a key on the Keys tab.' };
+      if (a.status === 'disabled') return { cls: '', text: 'Off' };
+      if (a.status === 'invalid') {
+        if (a.type === 'deepseek_web') return { cls: 'err', text: 'Signed out', note: 'Sign in at chat.deepseek.com, then click the bookmarklet.' };
+        if (a.type === 'kimi_web') return { cls: 'err', text: 'Signed out', note: 'Copy a fresh refresh_token from kimi.ai.' };
+        return { cls: 'err', text: 'Key rejected', note: a.lastError };
+      }
+      if (a.status === 'rate_limited' && (a.rateLimitedUntil || 0) > now) return { cls: 'warn', text: 'Resting', until: a.rateLimitedUntil, note: a.lastError };
+      return { cls: 'ok', text: 'Ready' };
+    }
+
+    function chip(st) {
+      const until = st.until ? ` <span data-until="${st.until}">${fmtDuration(st.until - Date.now())}</span>` : '';
+      return `<span class="chip ${st.cls}">${esc(st.text)}${until}</span>`;
+    }
+
+    function apiUsageText(u) {
+      if (!u) return '';
+      const part = (n, lim, unit) => lim > 0 ? `${n}/${lim} ${unit}` : `${n} ${unit}`;
+      return `${part(u.minute, u.limits?.minute, 'this minute')} · ${part(u.day, u.limits?.day, 'today')}`;
+    }
+
+    function usageText(u) {
+      if (!u) return '';
+      const part = (n, lim) => lim > 0 ? `${n}/${lim}` : `${n}`;
+      return `${part(u.hour, u.limits?.hour)} this hour · ${part(u.day, u.limits?.day)} today`;
+    }
+
+    // ── Accounts list ──────────────────────────────────────────────
+    function renderAccounts() {
+      const box = $('#accList');
+      const now = Date.now();
+      const ready = accounts.filter(a => accountState(a, now).cls === 'ok').length;
+      $('#poolText').textContent = `${ready} of ${accounts.length} ready`;
+      $('#poolDot').className = 'dot ' + (ready === 0 ? 'err' : ready < accounts.length ? 'warn' : 'ok');
+
+      if (!accounts.length) {
+        box.innerHTML = '<div class="empty">No accounts yet. Add one to start routing requests.</div>';
+        return;
+      }
+      const sorted = [...accounts].sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99) || (b.totalRequests || 0) - (a.totalRequests || 0));
+      box.innerHTML = `
+        <div class="acc-row head"><div>Account</div><div>Model</div><div>Priority</div><div>Status</div><div>Keys</div><div>Requests</div><div></div></div>
+        ${sorted.map(a => {
+          const p = provider(a.type);
+          const st = accountState(a, now);
+          const keys = a.keys || [];
+          const healthy = keys.filter(k => k.status === 'active').length;
+          const note = st.cls !== 'ok' && st.note ? `<div class="acc-error trunc" title="${esc(st.note)}">${esc(st.note)}</div>` : '';
+          return `
+          <div class="acc-row${a.status === 'disabled' ? ' off' : ''}" data-id="${esc(a.id)}">
+            <div class="c-name" style="min-width:0">
+              <div class="acc-name trunc">${esc(a.label || p.name)}</div>
+              <div class="muted small trunc">${esc(p.name)} · ${p.kind}${a.dsEmail ? ' · ' + esc(a.dsEmail) : ''}</div>
+            </div>
+            <div style="min-width:0"><span class="cell-label">Model</span><span class="mono trunc" style="display:block" title="${esc(a.model)}">${esc(a.model || '—')}</span></div>
+            <div><span class="cell-label">Priority</span>${esc(a.priority ?? '—')}${a.role && a.role !== 'all' ? `<div class="muted small">${esc(roleName(a.role))}</div>` : ''}</div>
+            <div style="min-width:0"><span class="cell-label">Status</span>${chip(st)}${note}</div>
+            <div><span class="cell-label">Keys</span>${keys.length > 1 ? `${healthy}/${keys.length} ok` : keys.length}</div>
+            <div><span class="cell-label">Requests</span>${a.totalRequests || 0}<div class="muted small">${a.lastUsed ? esc(timeAgo(a.lastUsed)) : ''}</div></div>
+            <div class="c-actions acc-actions">
+              <button class="btn sm" data-act="test">Test</button>
+              <button class="btn sm" data-act="open">Manage</button>
+            </div>
+          </div>`;
+        }).join('')}`;
+    }
+
+    $('#accList').addEventListener('click', e => {
+      const row = e.target.closest('.acc-row[data-id]');
+      if (!row) return;
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'test') testAccount(row.dataset.id, e.target);
+      else openDrawer(row.dataset.id);
+    });
+
+    async function loadAccounts() {
+      try {
+        accounts = await api('/api/tokens');
+        renderAccounts();
+        if (openAccountId) renderDrawer(false);
+      } catch (err) {
+        $('#poolText').textContent = 'Proxy unreachable';
+        $('#poolDot').className = 'dot err';
+      }
+    }
+
+    async function testAccount(id, btn) {
+      const a = accounts.find(x => x.id === id);
+      const old = btn?.textContent;
+      if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+      try {
+        const r = await api(`/api/tokens/${encodeURIComponent(id)}/test`, { method: 'POST', raw: true });
+        if (r.ok) toast(`${a?.label || 'Account'} works · ${r.latencyMs} ms`);
+        else toast(`${a?.label || 'Account'} failed: ${r.error || r.status || 'unknown error'}`, true);
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = old; }
+        loadAccounts();
+      }
+    }
+
+    $('#btnTestAll').addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      const box = $('#testAllResult');
+      btn.disabled = true; btn.textContent = 'Testing…';
+      box.innerHTML = '';
+      try {
+        const r = await api('/api/tokens/test-all', { method: 'POST', raw: true });
+        if (!r.ok) throw new Error(r.error || 'Test failed');
+        const cls = r.invalid ? (r.active ? 'warn' : 'err') : 'ok';
+        const items = (r.results || []).map(x => {
+          const res = x.ok ? `${x.latencyMs} ms` : (x.error || x.status || 'failed');
+          return `<li><strong>${esc(x.label)}</strong> — ${x.ok ? 'ok' : esc(x.status || 'failed')}${x.ok ? ', ' : ': '}${esc(res)}</li>`;
+        }).join('');
+        box.innerHTML = `<div class="notice ${cls}"><div class="row" style="justify-content:space-between"><strong>${r.active} working, ${r.rateLimited || 0} resting, ${r.invalid || 0} failed</strong><button class="btn sm ghost" data-dismiss>Dismiss</button></div><ul>${items}</ul></div>`;
+      } catch (err) {
+        box.innerHTML = `<div class="notice err">${esc(err.message)}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Test all';
+        loadAccounts();
+      }
+    });
+    $('#testAllResult').addEventListener('click', e => { if (e.target.closest('[data-dismiss]')) $('#testAllResult').innerHTML = ''; });
+
+    // ── Account drawer ─────────────────────────────────────────────
+    const drawer = $('#accDrawer');
+
+    function openDrawer(id, tab = 'keys') {
+      openAccountId = id;
+      showDrawerTab(tab);
+      renderDrawer(true);
+      if (!drawer.open) drawer.showModal();
+    }
+    function closeDrawer() { drawer.close(); }
+    drawer.addEventListener('close', () => { openAccountId = null; });
+    drawer.addEventListener('click', e => { if (e.target === drawer) closeDrawer(); });
+    $('#drClose').addEventListener('click', closeDrawer);
+    $('#drTest').addEventListener('click', e => testAccount(openAccountId, e.currentTarget));
+
+    function showDrawerTab(tab) {
+      for (const t of $$('[data-drtab]')) t.setAttribute('aria-selected', String(t.dataset.drtab === tab));
+      $('#drKeys').hidden = tab !== 'keys';
+      $('#drDetails').hidden = tab !== 'details';
+    }
+    $$('[data-drtab]').forEach(t => t.addEventListener('click', () => showDrawerTab(t.dataset.drtab)));
+
+    // fillForm=false on background refresh so edits in progress are kept
+    function renderDrawer(fillForm) {
+      const a = accounts.find(x => x.id === openAccountId);
+      if (!a) { if (drawer.open) closeDrawer(); return; }
+      const p = provider(a.type);
+      const st = accountState(a);
+      $('#drLabel').textContent = a.label || p.name;
+      $('#drMeta').textContent = [p.name + ' ' + p.kind, a.dsEmail, `${a.totalRequests || 0} requests`, a.lastUsed ? 'last used ' + timeAgo(a.lastUsed) : null].filter(Boolean).join(' · ');
+      const reEnable = (a.status === 'invalid' || (a.status === 'rate_limited' && st.cls === 'warn'))
+        ? ` <button class="btn sm" id="drReset">${a.status === 'invalid' ? 'Mark as working' : 'Stop resting'}</button>` : '';
+      $('#drStatus').innerHTML = `<div class="row">${chip(st)}${st.cls !== 'ok' && st.note ? `<span class="muted small">${esc(st.note)}</span>` : ''}${reEnable}</div>${a.usage ? `<div class="muted small" style="margin-top:6px">${esc(usageText(a.usage))}${a.usage.strikes ? ` · ${a.usage.strikes} recent throttle warning${a.usage.strikes > 1 ? 's' : ''}` : ''}</div>` : ''}${a.apiUsage && (a.rpm || a.rpd) ? `<div class="muted small" style="margin-top:6px">${esc(apiUsageText(a.apiUsage))}</div>` : ''}`;
+      $('#drReset')?.addEventListener('click', () => saveAccount({ status: 'active' }, 'Account re-enabled'));
+      renderKeyList(a);
+      if (fillForm) fillDetails(a);
+    }
+
+    function keyChip(k) {
+      if (k.status === 'active') return '<span class="chip ok">Working</span>';
+      if (k.status === 'rate_limited' && (k.rateLimitedUntil || 0) > Date.now()) return `<span class="chip warn" title="${esc(k.lastError || '')}">Resting <span data-until="${k.rateLimitedUntil}">${fmtDuration(k.rateLimitedUntil - Date.now())}</span></span>`;
+      if (k.status === 'rate_limited') return '<span class="chip ok">Working</span>';
+      if (k.status === 'disabled') return '<span class="chip">Off</span>';
+      return `<span class="chip err" title="${esc(k.lastError || '')}">Rejected</span>`;
+    }
+
+    let replacingKeyId = null;
+    function renderKeyList(a) {
+      const keys = a.keys || [];
+      const list = $('#drKeyList');
+      if (!keys.length) { list.innerHTML = '<div class="notice warn">This account has no key yet.</div>'; return; }
+      list.innerHTML = keys.map((k, i) => `
+        <div class="key-row${k.active ? ' current' : ''}" data-key="${esc(k.id)}">
+          <div class="key-num" title="${k.active ? 'In use' : 'Order ' + k.index}">${k.index}</div>
+          <div style="min-width:0">
+            <div class="row"><span class="mono">${esc(k.token)}</span>${keyChip(k)}${k.active ? '<span class="chip info">In use</span>' : ''}</div>
+            ${(k.dsEmail || k.usage || (k.apiUsage && (a.rpm || a.rpd)) || (k.lastError && k.status !== 'active')) ? `<div class="muted small trunc">${[k.dsEmail ? esc(k.dsEmail) : '', k.usage ? esc(usageText(k.usage)) : '', k.apiUsage && (a.rpm || a.rpd) ? esc(apiUsageText(k.apiUsage)) : '', k.lastError && k.status !== 'active' ? esc(k.lastError) : ''].filter(Boolean).join(' · ')}</div>` : ''}
+          </div>
+          <div class="key-actions">
+            ${k.active ? '<button class="btn sm" data-kact="replace" title="Swap this key for a new one">Replace</button>' : '<button class="btn sm" data-kact="use" title="Switch to this key now">Use</button>'}
+            <button class="btn sm icon" data-kact="up" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move up">↑</button>
+            <button class="btn sm icon" data-kact="down" ${i === keys.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move down">↓</button>
+            <button class="btn sm icon danger" data-kact="delete" title="Delete key" aria-label="Delete key">✕</button>
+          </div>
+          ${replacingKeyId === k.id ? `<form class="replace-box" data-replace autocomplete="off"><input type="password" autocomplete="new-password" placeholder="New key" spellcheck="false"><button class="btn sm primary" type="submit">Test and save</button><button class="btn sm" type="button" data-kact="cancel">Cancel</button></form>` : ''}
+        </div>`).join('');
+      if (replacingKeyId) list.querySelector('[data-replace] input')?.focus();
+    }
+
+    $('#drKeyList').addEventListener('click', async e => {
+      const btn = e.target.closest('[data-kact]');
+      if (!btn) return;
+      const keyId = btn.closest('[data-key]').dataset.key;
+      const act = btn.dataset.kact;
+      const a = accounts.find(x => x.id === openAccountId);
+      if (act === 'replace') { replacingKeyId = keyId; renderKeyList(a); return; }
+      if (act === 'cancel') { replacingKeyId = null; renderKeyList(a); return; }
+      if (act === 'delete' && !confirm('Delete this key?')) return;
+      const base = `/api/tokens/${encodeURIComponent(openAccountId)}/keys/${encodeURIComponent(keyId)}`;
+      btn.disabled = true;
+      try {
+        if (act === 'delete') await api(base, { method: 'DELETE' });
+        else if (act === 'use') await api(`${base}/use`, { method: 'POST', body: {} });
+        else await api(`${base}/move`, { method: 'POST', body: { delta: act === 'up' ? -1 : 1 } });
+        await loadAccounts();
+      } catch (err) {
+        toast(err.message, true);
+        btn.disabled = false;
+      }
+    });
+
+    $('#drKeyList').addEventListener('submit', async e => {
+      e.preventDefault();
+      const form = e.target;
+      const token = form.querySelector('input').value.trim();
+      if (!token) return;
+      const btn = form.querySelector('[type=submit]');
+      btn.disabled = true; btn.textContent = 'Testing…';
+      try {
+        await api(`/api/tokens/${encodeURIComponent(openAccountId)}`, { method: 'PUT', body: { token } });
+        replacingKeyId = null;
+        toast('Key replaced');
+        await loadAccounts();
+      } catch (err) {
+        toast(`${err.message}. The old key is still in place.`, true);
+        btn.disabled = false; btn.textContent = 'Test and save';
+      }
+    });
+
+    $('#drAddKeys').addEventListener('submit', async e => {
+      e.preventDefault();
+      const text = $('#drNewKeys').value.trim();
+      if (!text) return;
+      const btn = $('#drAddKeysBtn');
+      btn.disabled = true; btn.textContent = 'Testing…';
+      try {
+        const r = await api(`/api/tokens/${encodeURIComponent(openAccountId)}/keys`, { method: 'POST', body: { token: text } });
+        $('#drNewKeys').value = '';
+        toast(`${r.added} key${r.added === 1 ? '' : 's'} added`);
+        await loadAccounts();
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Add';
+      }
+    });
+
+    function fillDetails(a) {
+      $('#edLabel').value = a.label || '';
+      fillModelPicker('ed', a.type, a.model);
+      $('#edPriority').value = a.priority ?? '';
+      $('#edRole').value = a.role || 'all';
+      $('#edBaseUrlField').hidden = isWeb(a.type);
+      $('#edBaseUrl').value = a.baseUrl || '';
+      $('#edEnabled').checked = a.status !== 'disabled';
+      for (const el of $$('#drDetails [data-api-only]')) el.hidden = isWeb(a.type);
+      $('#edRpm').value = a.rpm || 0;
+      $('#edRpd').value = a.rpd || 0;
+      $('#edModelList').innerHTML = '';
+      $('#edModel').placeholder = '';
+    }
+
+    async function saveAccount(body, okMsg) {
+      try {
+        await api(`/api/tokens/${encodeURIComponent(openAccountId)}`, { method: 'PUT', body });
+        toast(okMsg);
+        await loadAccounts();
+        return true;
+      } catch (err) {
+        toast(err.message, true);
+        return false;
+      }
+    }
+
+    $('#drDetails').addEventListener('submit', async e => {
+      e.preventDefault();
+      const a = accounts.find(x => x.id === openAccountId);
+      if (!a) return;
+      const body = {
+        label: $('#edLabel').value.trim(),
+        model: $('#edModel').value.trim() || $('#edModel').placeholder,
+        priority: Number($('#edPriority').value),
+        role: $('#edRole').value
+      };
+      if (!isWeb(a.type)) {
+        body.baseUrl = $('#edBaseUrl').value.trim();
+        body.rpm = Number($('#edRpm').value) || 0;
+        body.rpd = Number($('#edRpd').value) || 0;
+      }
+      const enabled = $('#edEnabled').checked;
+      if (!enabled && a.status !== 'disabled') body.status = 'disabled';
+      if (enabled && a.status === 'disabled') body.status = 'active';
+      const btn = $('#edSave');
+      btn.disabled = true;
+      if (await saveAccount(body, 'Saved')) fillDetails(accounts.find(x => x.id === openAccountId) || a);
+      btn.disabled = false;
+    });
+
+    $('#edDelete').addEventListener('click', async () => {
+      const a = accounts.find(x => x.id === openAccountId);
+      if (!a || !confirm(`Remove “${a.label}” and all its keys?`)) return;
+      try {
+        await api(`/api/tokens/${encodeURIComponent(a.id)}`, { method: 'DELETE' });
+        closeDrawer();
+        toast('Account removed');
+        loadAccounts();
+      } catch (err) { toast(err.message, true); }
+    });
+
+    // ── Add account ────────────────────────────────────────────────
+    const addDialog = $('#addDialog');
+
+    function onAddTypeChange() {
+      const type = $('#adType').value;
+      const p = provider(type);
+      fillModelPicker('ad', type, p.model);
+      $('#adPriority').value = p.priority;
+      $('#adKeyLabel').textContent = p.keyLabel;
+      $('#adKey').placeholder = p.placeholder || '';
+      $('#adKeyHint').textContent = p.keyHint || '';
+      $('#adBaseUrlField').hidden = !p.needsBaseUrl;
+      $('#adBaseUrl').value = p.needsBaseUrl && p.baseUrl && type !== 'openai_custom' ? p.baseUrl : '';
+      $('#adRpm').value = p.rpm || '';
+      $('#adRpd').value = p.rpd || '';
+      for (const el of $$('#addForm [data-api-only]')) el.hidden = isWeb(type);
+      $('#adModelList').innerHTML = '';
+    }
+
+    async function loadModels(btn, body, listId, input) {
+      const old = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Loading…';
+      try {
+        const { models } = await api('/api/provider-models', { method: 'POST', body });
+        $(listId).innerHTML = models.map(m => `<option value="${esc(m)}"></option>`).join('');
+        toast(models.length ? `${models.length} models found. Pick one in the Model field.` : 'The provider returned no models');
+        // An empty field shows the whole list; leaving it empty puts the previous model back
+        if (models.length) {
+          const prev = input.value;
+          input.placeholder = prev;
+          input.value = '';
+          input.addEventListener('blur', () => { if (!input.value.trim()) input.value = prev; input.placeholder = ''; }, { once: true });
+          input.focus();
+        }
+      } catch (err) {
+        toast(`Could not load models: ${err.message}`, true);
+      } finally {
+        btn.disabled = false; btn.textContent = old;
+      }
+    }
+    $('#adLoadModels').addEventListener('click', e => loadModels(e.currentTarget, {
+      type: $('#adType').value, token: $('#adKey').value.trim(), baseUrl: $('#adBaseUrl').value.trim()
+    }, '#adModelList', $('#adModel')));
+    $('#edLoadModels').addEventListener('click', e => loadModels(e.currentTarget, { id: openAccountId }, '#edModelList', $('#edModel')));
+    $('#adType').addEventListener('change', onAddTypeChange);
+
+    $('#btnAddAccount').addEventListener('click', () => {
+      $('#addForm').reset();
+      $('#adType').value = 'kimi_web';
+      onAddTypeChange();
+      $('#adError').innerHTML = '';
+      addDialog.showModal();
+      $('#adKey').focus();
+    });
+    $('#adCancel').addEventListener('click', () => addDialog.close());
+
+    $('#addForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const type = $('#adType').value;
+      const token = $('#adKey').value.trim();
+      const err = $('#adError');
+      if (!token) { err.innerHTML = '<div class="notice err">Paste the key first.</div>'; return; }
+      const body = {
+        type,
+        label: $('#adLabel').value.trim(),
+        model: $('#adModel').value.trim() || $('#adModel').placeholder,
+        priority: Number($('#adPriority').value) || provider(type).priority,
+        role: $('#adRole').value,
+        token,
+        keys: $('#adExtraKeys').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+      };
+      if (!isWeb(type)) {
+        body.rpm = Number($('#adRpm').value) || 0;
+        body.rpd = Number($('#adRpd').value) || 0;
+      }
+      if (provider(type).needsBaseUrl) {
+        body.baseUrl = $('#adBaseUrl').value.trim();
+        if (!body.baseUrl) { err.innerHTML = '<div class="notice err">Base URL is required for this provider.</div>'; return; }
+      }
+      const btn = $('#adSubmit');
+      btn.disabled = true; btn.textContent = 'Testing…';
+      err.innerHTML = '';
+      try {
+        const created = await api('/api/tokens', { method: 'POST', body });
+        addDialog.close();
+        toast(`${created.label || 'Account'} added`);
+        await loadAccounts();
+      } catch (e2) {
+        err.innerHTML = `<div class="notice err">${esc(e2.message)}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = 'Test and add';
+      }
+    });
+
+    // ── DeepSeek bookmarklet ───────────────────────────────────────
+    $('#btnBookmarklet').addEventListener('click', () => {
+      const origin = `http://${hostValue()}:${portValue()}`;
+      const adminKey = (store.get('adminKey') || '').replace(/[^A-Za-z0-9_-]/g, '');
+      const adminHeader = adminKey ? `,'x-admin-key':'${adminKey}'` : '';
+      const code = `javascript:(function(){let t=localStorage.getItem('userToken');try{const j=JSON.parse(t);if(j&&j.value)t=j.value;}catch(e){}if(!t){alert('No DeepSeek login found. Sign in first.');return;}fetch('${origin}/api/tokens/deepseek-sync',{method:'POST',headers:{'Content-Type':'application/json'${adminHeader}},body:JSON.stringify({token:t,userAgent:navigator.userAgent})}).then(r=>r.json()).then(d=>{if(d.error){alert('Proxy error: '+d.error.message);return;}const m={replaced:'Updated the token for '+d.label,filled:'Added the token to '+d.label,added:'Added a new account: '+d.label};alert(m[d.action]+'\\n('+d.account+')\\n\\nClose the tab when done. Logging out would invalidate the token.');}).catch(e=>alert('Could not reach the proxy: '+e));})();`;
+      navigator.clipboard.writeText(code).then(() => {
+        alert('Bookmarklet copied.\n\n1. Create a bookmark and paste this as its URL.\n2. Sign in at chat.deepseek.com.\n3. Click the bookmark. The proxy matches the account and stores its token.\n4. Close the tab. Don\'t log out.');
+      }).catch(() => window.prompt('Copy the bookmarklet:', code));
+    });
+
+    // ── Access keys ────────────────────────────────────────────────
+    const maskKey = k => k.length > 18 ? k.slice(0, 12) + '…' + k.slice(-4) : k;
+    const isClaudeKey = k => String(k).startsWith('sk-ant-');
+
+    function renderProxyKeys() {
+      const body = $('#proxyKeysBody');
+      if (!proxyKeys.length) { body.innerHTML = '<tr><td colspan="5" class="muted">No keys yet.</td></tr>'; return; }
+      body.innerHTML = proxyKeys.map(k => `
+        <tr data-pk="${esc(k.id)}">
+          <td><strong>${esc(k.label)}</strong></td>
+          <td><span class="mono" data-full="${esc(k.key)}">${esc(maskKey(k.key))}</span></td>
+          <td>${isClaudeKey(k.key) ? 'Claude Code' : 'Codex'}</td>
+          <td class="muted">${k.createdAt ? esc(new Date(k.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })) : ''}</td>
+          <td style="text-align:right; white-space:nowrap">
+            <button class="btn sm" data-pkact="show">Show</button>
+            <button class="btn sm" data-pkact="copy">Copy</button>
+            <button class="btn sm danger" data-pkact="delete">Delete</button>
+          </td>
+        </tr>`).join('');
+    }
+
+    $('#proxyKeysBody').addEventListener('click', async e => {
+      const btn = e.target.closest('[data-pkact]');
+      if (!btn) return;
+      const id = btn.closest('[data-pk]').dataset.pk;
+      const k = proxyKeys.find(x => x.id === id);
+      if (!k) return;
+      if (btn.dataset.pkact === 'copy') return copyText(k.key, btn);
+      if (btn.dataset.pkact === 'show') {
+        const span = btn.closest('tr').querySelector('[data-full]');
+        const shown = span.textContent === k.key;
+        span.textContent = shown ? maskKey(k.key) : k.key;
+        btn.textContent = shown ? 'Show' : 'Hide';
+        return;
+      }
+      if (!confirm(`Delete “${k.label}”? Clients using it will stop working.`)) return;
+      try {
+        await api(`/api/proxy-keys/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        toast('Key deleted');
+        loadProxyKeys();
+      } catch (err) { toast(err.message, true); }
+    });
+
+    $('#newKeyForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      try {
+        const k = await api('/api/proxy-keys', { method: 'POST', body: { label: $('#newKeyLabel').value.trim(), type: $('#newKeyType').value } });
+        $('#newKeyLabel').value = '';
+        await loadProxyKeys();
+        copyText(k.key);
+        toast('Key created and copied');
+      } catch (err) { toast(err.message, true); }
+    });
+
+    async function loadProxyKeys() {
+      try {
+        proxyKeys = await api('/api/proxy-keys');
+        renderProxyKeys();
+        renderConnect();
+      } catch (err) { toast(err.message, true); }
+    }
+
+    // ── Connect ────────────────────────────────────────────────────
+    const detected = {
+      host: (!location.hostname || location.hostname === 'localhost') ? '127.0.0.1' : location.hostname,
+      port: location.port || '18789'
+    };
+    const hostValue = () => $('#hostInput').value.trim() || detected.host;
+    const portValue = () => $('#portInput').value.trim() || detected.port;
+    const httpsPortValue = () => $('#httpsPortInput').value.trim() || '18790';
+    const isRemote = () => !['127.0.0.1', 'localhost', '::1'].includes(hostValue());
+
+    const ui = { client: 'codex', remoteOs: 'linux', claudeMode: 'https', claudeOs: 'win' };
+
+    function bindSeg(id, key, attr) {
+      $(id).addEventListener('click', e => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        ui[key] = b.dataset[attr];
+        for (const x of $$(`${id} button`)) x.setAttribute('aria-pressed', String(x === b));
+        renderConnect();
+      });
+    }
+    bindSeg('#clientSeg', 'client', 'client');
+    bindSeg('#remoteOsSeg', 'remoteOs', 'os');
+    bindSeg('#claudeModeSeg', 'claudeMode', 'mode');
+    bindSeg('#claudeOsSeg', 'claudeOs', 'os');
+
+    function codexKey() { return proxyKeys.find(k => !isClaudeKey(k.key))?.key || proxyKeys[0]?.key || 'YOUR_PROXY_KEY'; }
+    function claudeKey() { return proxyKeys.find(k => isClaudeKey(k.key))?.key || 'sk-ant-api03-YOUR_KEY'; }
+
+    function renderConnect() {
+      const host = hostValue(), port = portValue(), httpsPort = httpsPortValue();
+      $('#clientCodex').hidden = ui.client !== 'codex';
+      $('#clientClaude').hidden = ui.client !== 'claude';
+      $$('.httpsPortText').forEach(el => { el.textContent = httpsPort; });
+      $('#codexBase').textContent = `http://${host}:${port}/openai/v1`;
+
+      $('#remoteSetup').hidden = !isRemote();
+      $('#remoteCmd').textContent = ui.remoteOs === 'linux'
+        ? `curl -fsSL -H "Authorization: Bearer ${codexKey()}" http://${host}:${port}/api/codex-setup.sh | bash`
+        : `irm -Headers @{Authorization='Bearer ${codexKey()}'} http://${host}:${port}/api/codex-setup.ps1 | iex`;
+      $('#btnApplyCodex').textContent = isRemote() ? `Write to ${host}` : 'Write to this machine';
+
+      const https = ui.claudeMode === 'https';
+      const base = https ? `https://${host}:${httpsPort}/anthropic` : `http://127.0.0.1:${port}/anthropic`;
+      const env = [
+        ...(https ? [['NODE_TLS_REJECT_UNAUTHORIZED', '0']] : []),
+        ['ANTHROPIC_BASE_URL', base],
+        ['ANTHROPIC_API_KEY', claudeKey()],
+        ['ANTHROPIC_MODEL', 'sonnet[1m]'],
+        ['CLAUDE_CODE_MAX_CONTEXT_TOKENS', '1048576'],
+        ['CLAUDE_CODE_SIMPLE', '1']
+      ];
+      let cmd;
+      if (ui.claudeOs === 'win') cmd = env.map(([k, v]) => `$env:${k}="${v}"`).join('; ') + '; claude';
+      else if (ui.claudeOs === 'cmd') cmd = env.map(([k, v]) => `set ${k}=${v}`).join(' && ') + ' && claude';
+      else cmd = 'export ' + env.map(([k, v]) => `${k}="${v}"`).join(' ') + ' && claude';
+      $('#claudeCmd').textContent = cmd;
+      $('#noClaudeKey').hidden = proxyKeys.some(k => isClaudeKey(k.key));
+
+      const showNetsh = !https && isRemote();
+      $('#netshBox').hidden = !showNetsh;
+      if (showNetsh) $('#netshCmd').textContent = `netsh interface portproxy add v4tov4 listenport=${port} listenaddress=127.0.0.1 connectport=${port} connectaddress=${host}`;
+    }
+
+    let tomlTimer;
+    function refreshToml() {
+      clearTimeout(tomlTimer);
+      tomlTimer = setTimeout(async () => {
+        try {
+          const q = new URLSearchParams({ host: hostValue(), port: portValue() });
+          $('#tomlPreview').textContent = (await api(`/api/codex-config.toml?${q}`)).trim();
+        } catch (err) {
+          $('#tomlPreview').textContent = `Could not load the config: ${err.message}`;
+        }
+      }, 250);
+    }
+
+    for (const id of ['#hostInput', '#portInput', '#httpsPortInput']) {
+      $(id).addEventListener('input', () => { renderConnect(); refreshToml(); });
+    }
+    $('#btnResetHost').addEventListener('click', () => {
+      $('#hostInput').value = detected.host;
+      $('#portInput').value = detected.port;
+      $('#httpsPortInput').value = '18790';
+      renderConnect(); refreshToml();
+    });
+
+    document.addEventListener('click', e => {
+      const b = e.target.closest('[data-copy]');
+      if (b) copyText($('#' + b.dataset.copy).textContent, b);
+    });
+
+    $('#btnDownloadToml').addEventListener('click', () => {
+      const q = new URLSearchParams({ download: '1', host: hostValue(), port: portValue() });
+      location.href = `/api/codex-config.toml?${q}`;
+    });
+
+    $('#btnApplyCodex').addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        await api('/api/apply-codex-config', { method: 'POST', body: { host: hostValue(), port: portValue() } });
+        toast(isRemote() ? `Written to ~/.codex on ${hostValue()}` : 'Written to ~/.codex/config.toml and ~/.codex/.env');
+      } catch (err) { toast(err.message, true); }
+      finally { btn.disabled = false; }
+    });
+
+    // ── Settings ───────────────────────────────────────────────────
+    const settingsForm = $('#settingsForm');
+    const PRESETS = {
+      '128k': { contextWindow: 128000, autoCompactLimit: 100000, sessionRotateChars: 300000, fullPromptMaxChars: 240000 },
+      '1m': { contextWindow: 1048576, autoCompactLimit: 400000, sessionRotateChars: 1500000, fullPromptMaxChars: 1200000 }
+    };
+
+    function fillSettings(values) {
+      for (const [k, v] of Object.entries(values)) {
+        const input = settingsForm.elements[k];
+        if (input) input.value = v;
+      }
+      updateApprox();
+    }
+
+    function readSettings() {
+      const out = {};
+      for (const k of Object.keys(schema)) {
+        const input = settingsForm.elements[k];
+        if (input) out[k] = Number(input.value);
+      }
+      return out;
+    }
+
+    function updateApprox() {
+      for (const el of $$('[data-approx]', settingsForm)) {
+        const n = Number(el.parentElement.querySelector('input').value);
+        // About 3.5 characters per token for mixed text and code
+        el.textContent = !n ? '' : el.dataset.approx === 'chars' ? `≈ ${fmtCount(Math.round(n / 3.5))} tokens` : `≈ ${fmtCount(n)}`;
+      }
+      const changed = Object.entries(readSettings()).some(([k, v]) => settings[k] !== v);
+      $('#settingsDirty').textContent = changed ? 'Unsaved changes' : '';
+    }
+    settingsForm.addEventListener('input', updateApprox);
+
+    $$('[data-preset]').forEach(b => b.addEventListener('click', () => fillSettings(PRESETS[b.dataset.preset])));
+
+    async function saveSettings(applyToCodex) {
+      const values = readSettings();
+      for (const [k, v] of Object.entries(values)) {
+        const s = schema[k];
+        if (!Number.isFinite(v) || (s && (v < s.min || v > s.max))) {
+          toast(`${settingsForm.elements[k].closest('label').querySelector('span').textContent}: must be between ${s.min} and ${s.max}`, true);
+          settingsForm.elements[k].focus();
+          return;
+        }
+      }
+      if (values.autoCompactLimit >= values.contextWindow) { toast('Auto-compact must be lower than the context window', true); return; }
+      try {
+        const r = await api('/api/settings', { method: 'POST', body: { ...values, applyToCodex } });
+        settings = r.settings;
+        fillSettings(settings);
+        toast(r.appliedTo ? `Saved. Restart Codex to pick up ${r.appliedTo}` : 'Saved');
+        refreshToml();
+      } catch (err) { toast(err.message, true); }
+    }
+    settingsForm.addEventListener('submit', e => { e.preventDefault(); saveSettings(false); });
+    $('#btnSaveApply').addEventListener('click', () => saveSettings(true));
+
+    $('#btnLogs').addEventListener('click', async () => {
+      try {
+        const text = await api('/api/logs?download=1');
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `proxy-log-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch (err) { toast(err.message, true); }
+    });
+
+    async function loadSettings() {
+      try {
+        const r = await api('/api/settings');
+        settings = r.settings;
+        schema = r.schema || {};
+        for (const [k, s] of Object.entries(schema)) {
+          const input = settingsForm.elements[k];
+          if (input) { input.min = s.min; input.max = s.max; }
+        }
+        fillSettings(settings);
+      } catch (err) { toast(err.message, true); }
+    }
+
+    // ── Live updates ───────────────────────────────────────────────
+    setInterval(() => {
+      const now = Date.now();
+      let expired = false;
+      for (const el of $$('[data-until]')) {
+        const left = Number(el.dataset.until) - now;
+        if (left <= 0) expired = true;
+        el.textContent = fmtDuration(left);
+      }
+      if (expired) loadAccounts();
+    }, 1000);
+    setInterval(() => { if (!document.hidden) loadAccounts(); }, 10000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadAccounts(); });
+
+    // ── Start ──────────────────────────────────────────────────────
+    $('#hostInput').value = detected.host;
+    $('#portInput').value = detected.port;
+    showTab((location.hash || '').slice(1) || store.get('tab') || 'accounts');
+    renderConnect();
+    loadPresets();
+    loadAccounts();
+    loadProxyKeys();
+    loadSettings();
+    fetch('/health').then(r => r.json()).then(h => { if (h.version) $('#version').textContent = 'v' + h.version; }).catch(() => {});
+  })();
+  </script>
+</body>
+</html>

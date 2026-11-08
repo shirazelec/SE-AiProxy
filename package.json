@@ -1,0 +1,25 @@
+{
+  "name": "se-aiproxy",
+  "version": "1.0.0",
+  "description": "SE-AiProxy: one gateway for Codex, Claude Code and any OpenAI / Anthropic client, backed by OpenAI, Anthropic, DeepSeek, Kimi, Gemini and other providers",
+  "author": "shirazelectronic (https://shirazelectronic.ir)",
+  "homepage": "https://shirazelectronic.ir",
+  "main": "src/server.js",
+  "bin": {
+    "se-aiproxy": "./bin/proxy.js"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "install-codex": "node bin/install.js",
+    "release": "node bin/build-release.js",
+    "test": "node --import ./test/setup.js --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "@rezaparsian/deepseek-pow-solver": "^1.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules
+.git
+.env
+data/config.json
+test
+scripts
+*.log
+.claude-launch-tmp
+
+# Runtime data: tokens, TLS private key, debug dumps
+data/
+logs/
