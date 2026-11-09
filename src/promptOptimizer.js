@@ -79,7 +79,7 @@ export async function optimizePromptWithSupervisor({ userText, signal, avoidToke
   }
   // Long texts are already detailed (often Codex's own handoff summary after compaction); rewriting
   // them only loses details and spends a helper request
-  if (trimmed.length > MAX_OPTIMIZE_CHARS || /CONTEXT\s+CHECKPOINT\s+COMPACTION|handoff\s+summary/i.test(trimmed)) {
+  if (trimmed.length > MAX_OPTIMIZE_CHARS || /CONTEXT\s+CHECKPOINT\s+COMPACTION|handoff\s+summary|checkpoint|compaction|خلاصه|وضعیت|گزارش|دستور/i.test(trimmed)) {
     return null;
   }
 

@@ -122,30 +122,33 @@ export function normalizeToolCallMarkup(content) {
   if (/<invoke\b/i.test(s)) s = s.replace(/<\/(?:function|call|tool)>/gi, '</invoke>');
 
   // Tool name with a "tool" prefix: <tool_exec_command>, <tool:exec_command>, <tools.apply_patch>
-  s = s.replace(/<(\/?)tools?[_:.\-]+(exec_commands?|writes?_stdin|apply_patch(?:es)?|view_images?)\b/gi, '<$1$2');
+  s = s.replace(/<(\/?)tools?[_:.\-]+(exec_commands?|writes?_stdin|apply_patch(?:es)?|view_images?|bash|shell|sh|terminal|run_commands?|execute_commands?)\b/gi, '<$1$2');
 
   // <exec_command> without <parameter> children: the command sits in a <cmd>/<command> child,
   // a cmd="..." attribute, or is the bare body. Otherwise the call is dropped as "no cmd" and the
   // raw tag leaks into the reply Codex shows.
-  s = s.replace(/<exec_commands?\b([^>]*)>([\s\S]*?)<\/exec_commands?>/gi, (m, attrs, body) => {
-    if (/<parameter\b/i.test(body)) return m;
-    const attr = attrs.match(/\b(?:cmd|command)\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-    const child = body.match(/<(cmd|command)\b[^>]*>([\s\S]*?)<\/\1>/i);
+  s = s.replace(/<(?:exec_commands?|bash|shell|sh|terminal|run_commands?|execute_commands?)\b([^>]*)>([\s\S]*?)<\/(?:exec_commands?|bash|shell|sh|terminal|run_commands?|execute_commands?)>/gi, (m, attrs, body) => {
+    if (/<parameter\b/i.test(body)) return `<invoke name="exec_command">${body}</invoke>`;
+    const attr = attrs.match(/\b(?:cmd|command|input)\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+    const child = body.match(/<(cmd|command|input)\b[^>]*>([\s\S]*?)<\/\1>/i);
     // Inside an attribute quotes have to be escaped, so decode them even next to a bare `&&`
     const decodeAttr = v => v.replace(/&quot;/g, '"').replace(/&(?:apos|#39);/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     const cmd = (attr ? decodeAttr(attr[1] ?? attr[2]) : child ? child[2] : body).trim();
     if (!cmd || /<[a-z_]+\b[^>]*>/i.test(cmd)) return m;
-    return `<exec_command><parameter name="cmd" string="true">${cmd}</parameter></exec_command>`;
+    return `<invoke name="exec_command"><parameter name="cmd" string="true">${cmd}</parameter></invoke>`;
   });
 
-  // Direct tool name invocations: <write_stdin> / <writes_stdin> / <exec_command> / <apply_patch> / <view_image>
+  // Handle <invoke name="exec_command" cmd="..."> or command="..."
+  s = s.replace(/<invoke\s+name=["']?exec_commands?["']?\s+(?:cmd|command|input)=["']([^"']+)["'][^>]*>/gi, '<invoke name="exec_command"><parameter name="cmd">$1</parameter>');
+
+  // Direct tool name invocations: <write_stdin> / <writes_stdin> / <exec_command> / <apply_patch> / <view_image> / <bash> / <shell>
   s = s
     .replace(/<writes?_stdin\b[^>]*>/gi, '<invoke name="write_stdin">')
     .replace(/<\/writes?_stdin>/gi, '</invoke>')
-    .replace(/<exec_commands?\b[^>]*>/gi, '<invoke name="exec_command">')
-    .replace(/<\/exec_commands?>/gi, '</invoke>')
-    .replace(/<apply_patch(?:es)?\b[^>]*>/gi, '<invoke name="apply_patch">')
-    .replace(/<\/apply_patch(?:es)?>/gi, '</invoke>')
+    .replace(/<(?:exec_commands?|bash|shell|sh|terminal|run_commands?|execute_commands?)\b[^>]*>/gi, '<invoke name="exec_command">')
+    .replace(/<\/(?:exec_commands?|bash|shell|sh|terminal|run_commands?|execute_commands?)>/gi, '</invoke>')
+    .replace(/<(?:apply_patch(?:es)?|patch|diff|apply_diff)\b[^>]*>/gi, '<invoke name="apply_patch">')
+    .replace(/<\/(?:apply_patch(?:es)?|patch|diff|apply_diff)>/gi, '</invoke>')
     .replace(/<view_images?\b[^>]*>/gi, '<invoke name="view_image">')
     .replace(/<\/view_images?>/gi, '</invoke>');
 
@@ -268,11 +271,22 @@ function parseParams(body) {
         : rest.replace(/^\s*(?:"|'|<\|[^|>]*\|>|\|)*\s*>?/, '');
     }
 
-    const pName = attrs.name || attrs.parameter || null;
-    if (!pName) continue;
+    let pName = attrs.name || attrs.parameter || null;
+    if (!pName) {
+      if (starts.length === 1 && !args.cmd && value) {
+        value = value.replace(/<\|(?:close|end|im_end|eot_id|tool_call_end|tool_calls_end)\|>[\s\S]*$/, '');
+        const val = decodeXmlEntities(value.trim());
+        if (val) args.cmd = val;
+      }
+      continue;
+    }
     // Kimi's native special tokens sometimes leak after the value: `ls<|close|>argument<|sep|><|close|>call`
     value = value.replace(/<\|(?:close|end|im_end|eot_id|tool_call_end|tool_calls_end)\|>[\s\S]*$/, '');
     let val = decodeXmlEntities(value.trim());
+    // Normalize common command parameter names to cmd
+    if (['command', 'cmd', 'input', 'code', 'script'].includes(pName.toLowerCase())) {
+      if (!args.cmd && val) args.cmd = val;
+    }
     // Keep first non-empty value; ignore subsequent repetitive loop hallucinations
     if (args[pName] !== undefined && args[pName] !== '') continue;
     if (attrs.string === 'false') {
@@ -390,6 +404,21 @@ function sanitizeToolArgs(args, fnName = '') {
       args[key] = args[key].replace(LEAKED_CLOSING_TAGS_RE, '');
       if (key !== 'cmd' && key !== 'patch' && key !== 'input') args[key] = args[key].trim();
     }
+  }
+  const isShell = fnName === 'exec_command' || /^(?:bash|shell|sh|terminal|run_command|execute_command|cmd)$/i.test(fnName);
+  if (isShell && !args.cmd) {
+    args.cmd = args.command || args.input || args.code || args.script || args.action || args.value || '';
+  }
+  if (isShell && typeof args.cmd === 'string') {
+    const trimmedCmd = args.cmd.trim();
+    if (/^<\/?(?:parameter|invoke|tool_calls?|action|tool|inv)\b/i.test(trimmedCmd) || /^<[a-zA-Z_][\w-]*(?:\s+[^>]*)?$/.test(trimmedCmd)) {
+      console.warn(`[Parser] Intercepted broken XML tag in cmd argument: '${trimmedCmd}'. Stripping.`);
+      delete args.cmd;
+    }
+  }
+  const isPatch = fnName === 'apply_patch' || /^(?:patch|diff|apply_diff)$/i.test(fnName);
+  if (isPatch && !args.patch) {
+    args.patch = args.content || args.input || args.diff || '';
   }
   coerceArgTypes(args);
   sanitizeSandboxPermissions(args);
@@ -758,13 +787,14 @@ export function extractRawShellCommand(text) {
   if (!trimmed) return { clean: text, calls: [] };
   if (looksLikeDocumentation(trimmed)) return { clean: text, calls: [] };
 
-  const BARE_CMD_RE = /^(?:cd\s+(?:"[^"]+"|\'[^\']+\'|[^\s;&|]+)(?:\s*&&|\s*;)?|git\s+|make\b|cmake\b|gcc\b|g\+\+\b|clang\b|python[23]?\s+|pytest\b|npm\s+|npx\s+|node\s+|grep\s+|rg\s+|find\s+|cat\s+|head\s+|tail\s+|sed\s+|awk\s+|ls\s+|rm\s+|mkdir\s+|cp\s+|mv\s+|curl\s+|wget\s+|\.\/)\s*([\s\S]*)$/;
+  const BARE_CMD_RE = /^[ \t]*(?:[$>#]\s*)?`?(?:cd\s+(?:"[^"]+"|\'[^\']+\'|[^\s;&|]+)(?:\s*&&|\s*;)?|git\s+|make\b|cmake\b|gcc\b|g\+\+\b|clang\b|python[23]?\s+|pytest\b|npm\s+|npx\s+|node\s+|grep\s+|rg\s+|find\s+|cat\s+|head\s+|tail\s+|sed\s+|awk\s+|ls\s+|rm\s+|mkdir\s+|cp\s+|mv\s+|curl\s+|wget\s+|\.\/)\s*([\s\S]*?)`?$/;
+  const cleanCmdStr = s => s.replace(/^[ \t]*[$>#]\s*/, '').replace(/^`|`$/g, '').trim();
 
   // 1. Fenced bash/sh code block
   const fencedMatch = trimmed.match(/^([\s\S]*?)```(?:bash|sh|shell|zsh)?\s*\n+([\s\S]+?)\n+```([\s\S]*)$/i);
   if (fencedMatch) {
     const before = fencedMatch[1].trim();
-    const cmd = fencedMatch[2].trim();
+    const cmd = cleanCmdStr(fencedMatch[2]);
     const after = fencedMatch[3].trim();
     if (isRunnableCommand(cmd) && !/^(?:def |class |function |import |#include|<|var |const |let )/m.test(cmd)) {
       const isShellLike = /(?:&&|\||;|\b(?:cd|git|pytest|python[23]?|make|cmake|gcc|g\+\+|clang|npm|npx|node|grep|rg|find|cat|head|tail|sed|awk|ls|rm|mkdir|cp|mv|curl|wget)\b)/.test(cmd);
@@ -785,13 +815,14 @@ export function extractRawShellCommand(text) {
   if (BARE_CMD_RE.test(trimmed)) {
     const hasProseIndicators = /(?:please|because|should|would|could|however|therefore|لطفاً|چون|باید|می‌توان|است\b|شد\b)/i.test(trimmed);
     const hasShellPunctuation = /(?:&&|\||;|\s-[a-zA-Z]|\/|\\|\*)/.test(trimmed);
-    if (!hasProseIndicators && hasShellPunctuation && isRunnableCommand(trimmed)) {
+    const cmd = cleanCmdStr(trimmed);
+    if (!hasProseIndicators && hasShellPunctuation && isRunnableCommand(cmd)) {
       return {
         clean: '',
         calls: [{
           id: generateId('call_'),
           name: 'exec_command',
-          arguments: JSON.stringify({ cmd: trimmed })
+          arguments: JSON.stringify({ cmd })
         }]
       };
     }
@@ -805,14 +836,15 @@ export function extractRawShellCommand(text) {
       if (BARE_CMD_RE.test(lineTrimmed)) {
         const hasProseIndicators = /(?:please|because|should|would|could|however|therefore|لطفاً|چون|باید|می‌توان|است\b|شد\b)/i.test(lineTrimmed);
         const hasShellPunctuation = /(?:&&|\||;|\s-[a-zA-Z]|\/|\\|\*)/.test(lineTrimmed);
-        if (!hasProseIndicators && hasShellPunctuation && isRunnableCommand(lineTrimmed)) {
+        const cmd = cleanCmdStr(lineTrimmed);
+        if (!hasProseIndicators && hasShellPunctuation && isRunnableCommand(cmd)) {
           const cleanIntro = lines.slice(0, i).filter(Boolean).join('\n').trim();
           return {
             clean: cleanIntro,
             calls: [{
               id: generateId('call_'),
               name: 'exec_command',
-              arguments: JSON.stringify({ cmd: lineTrimmed })
+              arguments: JSON.stringify({ cmd })
             }]
           };
         }
@@ -823,13 +855,14 @@ export function extractRawShellCommand(text) {
     if (BARE_CMD_RE.test(lastLines)) {
       const hasProseIndicators = /(?:please|because|should|would|could|however|therefore|لطفاً|چون|باید|می‌توان|است\b|شد\b)/i.test(lastLines);
       const hasShellPunctuation = /(?:&&|\||;|\s-[a-zA-Z]|\/|\\|\*)/.test(lastLines);
-      if (!hasProseIndicators && hasShellPunctuation && isRunnableCommand(lastLines)) {
+      const cmd = cleanCmdStr(lastLines);
+      if (!hasProseIndicators && hasShellPunctuation && isRunnableCommand(cmd)) {
         return {
           clean: lines[0].trim(),
           calls: [{
             id: generateId('call_'),
             name: 'exec_command',
-            arguments: JSON.stringify({ cmd: lastLines })
+            arguments: JSON.stringify({ cmd })
           }]
         };
       }
@@ -884,9 +917,19 @@ export function parseToolCalls(rawContent) {
   const invokePattern = /<invoke(?:\s+name=|=)\s*["']?([^"'>\s]+)["']?[^>]*>\s*([\s\S]*?)(?:<\/invoke>|$)/gi;
   let invokeMatch;
   while ((invokeMatch = invokePattern.exec(content)) !== null) {
-    const fnName = invokeMatch[1].trim();
+    let fnName = invokeMatch[1].trim();
     const invokeBody = invokeMatch[2];
+    const SHELL_ALIASES = new Set(['exec_command', 'exec_commands', 'bash', 'shell', 'sh', 'terminal', 'cmd', 'command', 'run_command', 'execute_command']);
+    const PATCH_ALIASES = new Set(['apply_patch', 'apply_patches', 'patch', 'diff', 'apply_diff']);
+    if (SHELL_ALIASES.has(fnName.toLowerCase())) fnName = 'exec_command';
+    else if (PATCH_ALIASES.has(fnName.toLowerCase())) fnName = 'apply_patch';
     const args = sanitizeToolArgs(parseParams(invokeBody), fnName);
+
+    // If exec_command contains bare body without parameter tags
+    if (fnName === 'exec_command' && !args.cmd) {
+      const cleanBody = invokeBody.replace(/<[^>]+>/g, '').trim();
+      if (cleanBody && !cleanBody.startsWith('{')) args.cmd = cleanBody;
+    }
 
     // If exec_command contains an embedded apply_patch, convert directly to apply_patch tool
     if (fnName === 'exec_command' && typeof args.cmd === 'string' && PATCH_BEGIN_RE.test(args.cmd)) {
@@ -1062,8 +1105,11 @@ export function parseToolCalls(rawContent) {
     .replace(/(?:^|\n)\s*[|｜]+\s*(?:\n|$)/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  // A separator Kimi leaves dangling next to its <ACTION> label
-  if (/<ACTION\b/i.test(content)) cleanContent = cleanContent.replace(/^\s*-{3,}\s*$/gm, '');
+  // Clean dangling, trailing, or repeated markdown horizontal rules (---) left behind by tool tags or dividers
+  cleanContent = cleanContent
+    .replace(/(?:\s*[-*_]{3,}\s*){2,}/g, '\n\n---\n\n')
+    .replace(/(?:\s*[-*_]{3,}\s*)+$/g, '')
+    .replace(/^(?:\s*[-*_]{3,}\s*)+/g, '');
 
   // Strip hallucinated tool results, simulated environment outputs, and synthetic dialogue
   cleanContent = cleanContent
@@ -1102,13 +1148,34 @@ export function parseToolCalls(rawContent) {
   const seenSigs = new Set();
   const dedupedCalls = [];
   for (const c of calls) {
-    // A shell call without a command cannot run; dropping it lets the supervisor ask for a proper one
-    if (c.name === 'exec_command') {
-      let cmd = '';
-      try { cmd = JSON.parse(c.arguments || '{}').cmd; } catch {}
-      if (!(typeof cmd === 'string' ? cmd.trim() : Array.isArray(cmd) && cmd.length)) {
+    if (c.name === 'exec_command' || /^(?:bash|shell|sh|terminal|run_command|execute_command|cmd)$/i.test(c.name)) {
+      c.name = 'exec_command';
+      let parsedArgs = {};
+      try { parsedArgs = JSON.parse(c.arguments || '{}'); } catch {
+        if (typeof c.arguments === 'string' && c.arguments.trim()) {
+          parsedArgs = { cmd: c.arguments.trim() };
+        }
+      }
+      let cmd = parsedArgs.cmd || parsedArgs.command || parsedArgs.input || parsedArgs.code || parsedArgs.script || '';
+      if (typeof cmd === 'string' ? cmd.trim() : Array.isArray(cmd) && cmd.length) {
+        if (!parsedArgs.cmd) parsedArgs.cmd = typeof cmd === 'string' ? cmd.trim() : cmd;
+        c.arguments = JSON.stringify(parsedArgs);
+      } else {
         console.warn('[Parser] Dropping exec_command call with no cmd (malformed tool call).');
         continue;
+      }
+    } else if (c.name === 'apply_patch' || /^(?:patch|diff|apply_diff)$/i.test(c.name)) {
+      c.name = 'apply_patch';
+      let parsedArgs = {};
+      try { parsedArgs = JSON.parse(c.arguments || '{}'); } catch {
+        if (typeof c.arguments === 'string' && c.arguments.trim()) {
+          parsedArgs = { patch: c.arguments.trim() };
+        }
+      }
+      let patch = parsedArgs.patch || parsedArgs.input || parsedArgs.content || parsedArgs.diff || '';
+      if (typeof patch === 'string' && patch.trim()) {
+        if (!parsedArgs.patch) parsedArgs.patch = patch.trim();
+        c.arguments = JSON.stringify(parsedArgs);
       }
     }
     const sig = `${c.name}::${c.arguments}`;
@@ -1322,7 +1389,8 @@ export function getVisibleStreamingText(accumulatedContent) {
     .replace(/<\/?\s*[^>]*?DSML[^>]*?>/gi, '')
     .replace(/[|｜]{1,2}[\s_]*DSML[\s_]*[|｜]{1,2}/gi, '')
     .replace(/<[|｜][^>]*?[|｜]>/g, '')
-    .replace(/<\/?div\b[^>]*>/gi, '');
+    .replace(/<\/?div\b[^>]*>/gi, '')
+    .replace(/(?:\s*[-*_]{3,}\s*)+$/g, '');
 
   if (!s.trim()) return '';
 
@@ -1446,14 +1514,15 @@ To execute a tool call, output a block in XML format:
 CRITICAL RULES:
 1. Provide required parameters; include optional ones only when actually needed. Do NOT provide redundant parameters.
 2. NEVER repeat a parameter tag. Each parameter must appear AT MOST ONCE.
-3. Close the invocation immediately with </invoke></tool_calls>.
-4. NEVER output empty <tools></tools> tags or lone </tools> tags. Use strictly <tool_calls><invoke name="...">...</invoke></tool_calls>.
-5. NEVER output DSML markup or tokens such as </__DSML__|>, <__DSML__|>, or <|...|>. Output strictly pure XML tags.
-6. Keep commands concise and verify outputs inside the project workspace.
-7. Output ONLY standard English XML tags (<tool_calls>, <invoke>, <parameter>). NEVER output pseudo or abbreviated tags like <inv calls>, <inv_calls>, <inv>, <call_tool>, or multilingual tags like <コール>, <ツール>, or <调用>.
-8. NEVER output raw JSON tool calls (e.g. [{"name": "exec_command", ...}] or {"name": ...}). You MUST format every tool call strictly using XML: <tool_calls><invoke name="...">...</invoke></tool_calls>.
-9. Write parameter values as raw text: never XML-escape them (write <, >, & and quotes literally, e.g. cat <<'EOF' > file && make), and never wrap them in CDATA.
-10. All tool calls of one reply run AT THE SAME TIME. Batch only independent read-only commands. A state-changing step (writing files, patches, builds, tests, git changes) must be the LAST call of its reply; run the steps that depend on it in the next reply, after you have seen its result.
+3. Close the invocation immediately with </invoke></tool_calls> and STOP GENERATING immediately after.
+4. NEVER simulate, hallucinate or write [TOOL RESULT...], [COMMAND OUTPUT...], or pretend to output terminal results. The execution environment runs your tool on the real operating system and provides the actual result in the next turn. Writing [TOOL RESULT] or inventing command outputs is strictly forbidden.
+5. NEVER output empty <tools></tools> tags or lone </tools> tags. Use strictly <tool_calls><invoke name="...">...</invoke></tool_calls>.
+6. NEVER output DSML markup or tokens such as </__DSML__|>, <__DSML__|>, or <|...|>. Output strictly pure XML tags.
+7. Keep commands concise and verify outputs inside the project workspace.
+8. Output ONLY standard English XML tags (<tool_calls>, <invoke>, <parameter>). NEVER output pseudo or abbreviated tags like <inv calls>, <inv_calls>, <inv>, <call_tool>, or multilingual tags like <コール>, <ツール>, or <调用>.
+9. NEVER output raw JSON tool calls (e.g. [{"name": "exec_command", ...}] or {"name": ...}). You MUST format every tool call strictly using XML: <tool_calls><invoke name="...">...</invoke></tool_calls>.
+10. Write parameter values as raw text: never XML-escape them (write <, >, & and quotes literally, e.g. cat <<'EOF' > file && make), and never wrap them in CDATA.
+11. All tool calls of one reply run AT THE SAME TIME. Batch only independent read-only commands. A state-changing step (writing files, patches, builds, tests, git changes) must be the LAST call of its reply; run the steps that depend on it in the next reply, after you have seen its result.
 `;
 }
 
@@ -1588,7 +1657,9 @@ const CONTEXT_BLOCK_RE = /^<([a-z][a-z0-9]*(?:[_-][a-z0-9]+)+)>[\s\S]*<\/\1>\s*$
 
 export function isSyntheticUserText(text) {
   const t = (text || '').trim();
-  return CODEX_CONTEXT_RE.test(t) || CONTEXT_BLOCK_RE.test(t) || /^# AGENTS\.md instructions/i.test(t);
+  return CODEX_CONTEXT_RE.test(t) || CONTEXT_BLOCK_RE.test(t) || /^# AGENTS\.md instructions/i.test(t) ||
+    /Another\s+language\s+model\s+started\s+to\s+solve/i.test(t) ||
+    /CONTEXT\s+CHECKPOINT\s+COMPACTION/i.test(t);
 }
 
 // developer/system messages carry instructions for the model, never the human's request
@@ -1706,6 +1777,9 @@ function formatHistoryItem(item, callNames, old) {
       text = text
         .replace(/سلام!?[^\n]*\n+/gi, '')
         .replace(/با توجه به لیست مشکلاتی که دادی[\s\S]*?(?:اول بذار کد رو دقیق‌تر بررسی کنم:?|اول باید کد رو دقیق‌تر ببینم:?|\n\n)/gi, '')
+        .replace(/(?:\s*[-*_]{3,}\s*){2,}/g, '\n\n---\n\n')
+        .replace(/(?:\s*[-*_]{3,}\s*)+$/g, '')
+        .replace(/^(?:\s*[-*_]{3,}\s*)+/g, '')
         .trim();
     }
     if (text) return `[${(item.role || 'user').toUpperCase()}]:\n${old ? truncateMiddle(text, OLD_ARGS_MAX_CHARS * 2) : text}`;

@@ -24,7 +24,7 @@ import { diagnoseToolError, formatDiagnosisNote } from './debugger.js';
 import { DEEPSEEK_WEB_MODELS, deepSeekWebModelOptions } from './deepseekWebModels.js';
 import { streamOpenAIChatAsResponsesChunks } from './providerRunner.js';
 import { streamKimiChatAsResponsesChunks } from './kimiWeb.js';
-import { findRepeatedCalls, loopAvoidanceNote, repeatedCallFollowUp, recentToolCalls, callSignature } from './repeatGuard.js';
+import { findRepeatedCalls, loopAvoidanceNote, repeatedCallFollowUp, recentToolCalls, callSignature, describeCall } from './repeatGuard.js';
 import { penalizeAccount, isNetworkError, isProviderWideOverload, NETWORK_FAIL_COOLDOWN_MS } from './accountHealth.js';
 
 // Cache sessions: conversation key / response id -> { sessionId, parentMessageId, tokenId, inputCount }
@@ -887,6 +887,10 @@ export async function handleResponsesRequest(req, res) {
   let outputIndex = 0;
   let reasoningStarted = false;
   let reasoningFinished = false;
+  let currentSummaryIndex = 0;
+  let currentPartStarted = false;
+  let currentPartText = '';
+  const summaryList = [];
   let messageStarted = false;
   let messageOutputIndex = -1;
   accumulatedRawContent = '';
@@ -954,27 +958,53 @@ export async function handleResponsesRequest(req, res) {
   const finishReasoning = () => {
     if (!reasoningStarted || reasoningFinished) return;
     reasoningFinished = true;
-    // Codex shows reasoning *summaries* by default (raw reasoning_text is hidden unless
-    // show_raw_agent_reasoning is set), so the model's thinking is streamed as a summary part.
-    writeEvent('response.reasoning_summary_text.done', {
-      type: 'response.reasoning_summary_text.done',
-      item_id: reasoningItemId,
-      output_index: outputIndex,
-      summary_index: 0,
-      text: accumulatedThinking
-    });
-    writeEvent('response.reasoning_summary_part.done', {
-      type: 'response.reasoning_summary_part.done',
-      item_id: reasoningItemId,
-      output_index: outputIndex,
-      summary_index: 0,
-      part: { type: 'summary_text', text: accumulatedThinking }
-    });
+    if (currentPartStarted && currentPartText.trim()) {
+      writeEvent('response.reasoning_summary_text.done', {
+        type: 'response.reasoning_summary_text.done',
+        item_id: reasoningItemId,
+        output_index: outputIndex,
+        summary_index: currentSummaryIndex,
+        text: currentPartText.trim()
+      });
+      writeEvent('response.reasoning_summary_part.done', {
+        type: 'response.reasoning_summary_part.done',
+        item_id: reasoningItemId,
+        output_index: outputIndex,
+        summary_index: currentSummaryIndex,
+        part: { type: 'summary_text', text: currentPartText.trim() }
+      });
+      summaryList.push({ type: 'summary_text', text: currentPartText.trim() });
+      currentPartStarted = false;
+      currentPartText = '';
+    } else if (currentPartStarted) {
+      writeEvent('response.reasoning_summary_text.done', {
+        type: 'response.reasoning_summary_text.done',
+        item_id: reasoningItemId,
+        output_index: outputIndex,
+        summary_index: currentSummaryIndex,
+        text: currentPartText
+      });
+      writeEvent('response.reasoning_summary_part.done', {
+        type: 'response.reasoning_summary_part.done',
+        item_id: reasoningItemId,
+        output_index: outputIndex,
+        summary_index: currentSummaryIndex,
+        part: { type: 'summary_text', text: currentPartText }
+      });
+      if (currentPartText) summaryList.push({ type: 'summary_text', text: currentPartText });
+      currentPartStarted = false;
+      currentPartText = '';
+    }
+
+    if (summaryList.length === 0 && accumulatedThinking.trim()) {
+      summaryList.push({ type: 'summary_text', text: accumulatedThinking.trim() });
+    }
+
     const reasoningDoneItem = {
       id: reasoningItemId,
       type: 'reasoning',
       status: 'completed',
-      summary: [{ type: 'summary_text', text: accumulatedThinking }]
+      summary: summaryList.length ? summaryList : [{ type: 'summary_text', text: accumulatedThinking || 'Thinking...' }]
     };
     writeEvent('response.output_item.done', {
       type: 'response.output_item.done',
@@ -996,25 +1026,98 @@ export async function handleResponsesRequest(req, res) {
           output_index: outputIndex,
           item: { id: reasoningItemId, type: 'reasoning', status: 'in_progress', summary: [] }
         });
-        writeEvent('response.reasoning_summary_part.added', {
-          type: 'response.reasoning_summary_part.added',
-          item_id: reasoningItemId,
-          output_index: outputIndex,
-          summary_index: 0,
-          part: { type: 'summary_text', text: '' }
-        });
       }
-      writeEvent('response.reasoning_summary_text.delta', {
-        type: 'response.reasoning_summary_text.delta',
-        item_id: reasoningItemId,
-        output_index: outputIndex,
-        summary_index: 0,
-        delta: chunk.content
-      });
+
+      let remaining = chunk.content;
+      while (remaining.length > 0) {
+        let splitIdx = remaining.indexOf('\n');
+        let isNewline = splitIdx !== -1;
+
+        // Break on sentence end if the current line has grown long enough (>100 chars)
+        if (!isNewline && currentPartText.length > 100) {
+          const m = /[\.\!\?؟]\s+/.exec(remaining);
+          if (m) {
+            splitIdx = m.index + m[0].length;
+            isNewline = false;
+          }
+        }
+
+        if (splitIdx === -1) {
+          const textToAppend = remaining;
+          remaining = '';
+          if (!currentPartStarted && textToAppend.trim()) {
+            writeEvent('response.reasoning_summary_part.added', {
+              type: 'response.reasoning_summary_part.added',
+              item_id: reasoningItemId,
+              output_index: outputIndex,
+              summary_index: currentSummaryIndex,
+              part: { type: 'summary_text', text: '' }
+            });
+            currentPartStarted = true;
+          }
+          if (currentPartStarted) {
+            currentPartText += textToAppend;
+            writeEvent('response.reasoning_summary_text.delta', {
+              type: 'response.reasoning_summary_text.delta',
+              item_id: reasoningItemId,
+              output_index: outputIndex,
+              summary_index: currentSummaryIndex,
+              delta: textToAppend
+            });
+          }
+        } else {
+          const segment = remaining.slice(0, splitIdx);
+          remaining = remaining.slice(splitIdx + (isNewline ? 1 : 0));
+
+          if (!currentPartStarted && segment.trim()) {
+            writeEvent('response.reasoning_summary_part.added', {
+              type: 'response.reasoning_summary_part.added',
+              item_id: reasoningItemId,
+              output_index: outputIndex,
+              summary_index: currentSummaryIndex,
+              part: { type: 'summary_text', text: '' }
+            });
+            currentPartStarted = true;
+          }
+
+          if (currentPartStarted) {
+            if (segment) {
+              currentPartText += segment;
+              writeEvent('response.reasoning_summary_text.delta', {
+                type: 'response.reasoning_summary_text.delta',
+                item_id: reasoningItemId,
+                output_index: outputIndex,
+                summary_index: currentSummaryIndex,
+                delta: segment
+              });
+            }
+            if (currentPartText.trim()) {
+              writeEvent('response.reasoning_summary_text.done', {
+                type: 'response.reasoning_summary_text.done',
+                item_id: reasoningItemId,
+                output_index: outputIndex,
+                summary_index: currentSummaryIndex,
+                text: currentPartText.trim()
+              });
+              writeEvent('response.reasoning_summary_part.done', {
+                type: 'response.reasoning_summary_part.done',
+                item_id: reasoningItemId,
+                output_index: outputIndex,
+                summary_index: currentSummaryIndex,
+                part: { type: 'summary_text', text: currentPartText.trim() }
+              });
+              summaryList.push({ type: 'summary_text', text: currentPartText.trim() });
+              currentSummaryIndex++;
+            }
+            currentPartStarted = false;
+            currentPartText = '';
+          }
+        }
+      }
     } else if (chunk.type === 'response') {
       finishReasoning();
-    if (emitTimer) { clearTimeout(emitTimer); emitTimer = null; }
-    emitVisibleDelta(accumulatedRawContent, true);
+      if (emitTimer) { clearTimeout(emitTimer); emitTimer = null; }
+      emitVisibleDelta(accumulatedRawContent, true);
       accumulatedRawContent += chunk.content;
       emitVisibleDelta(accumulatedRawContent);
     }
@@ -1098,13 +1201,25 @@ export async function handleResponsesRequest(req, res) {
       const isFinalReport = isFinalDeliverableReport(trimmedClean);
 
       // Cross-turn loop: the model re-issued a call it already ran (e.g. `cat` of a file whose output was truncated)
-      const repeats = findRepeatedCalls(parsed.calls, body.input);
+      let repeats = findRepeatedCalls(parsed.calls, body.input);
 
-      if (repeats.length > 0 && repeats.length === parsed.calls.length && repeatInterventions < 2) {
+      // If only some calls in this batch are repeated, drop the repeated ones immediately so Codex never runs them
+      if (repeats.length > 0 && repeats.length < parsed.calls.length) {
+        const repeatCallSet = new Set(repeats.map(r => r.call));
+        console.warn(`[Responses] Dropping ${repeats.length} redundant tool call(s) already in context: ${repeats.map(r => describeCall(r.call)).join(', ')}`);
+        parsed.calls = parsed.calls.filter(c => !repeatCallSet.has(c));
+        repeats = [];
+      }
+
+      if (repeats.length > 0 && repeatInterventions < 3) {
         isCrisis = true;
         reason = 'repeated identical tool call';
         repeatInterventions++;
         effectiveMaxFollowUps = Math.max(effectiveMaxFollowUps, round + 1);
+      } else if (repeats.length > 0 && repeatInterventions >= 3) {
+        console.warn(`[Responses] Model persistently repeated commands after ${repeatInterventions} supervisor interventions. Dropping repeated calls entirely to save tokens.`);
+        parsed.calls = [];
+        isCrisis = false;
       } else if (parsed.fabricatedResult && parsed.calls.length === 0 && fabricatedInterventions < 2) {
         // It wrote what a command "printed" without running anything; whatever it concluded is invented
         isCrisis = true;
@@ -1236,15 +1351,12 @@ ${formatReminder}`;
       }
     }
 
-    // Still repeating a call that has already run twice in a row: drop it instead of feeding Codex the loop
-    const recentCalls = recentToolCalls(body.input, 4);
-    const isStuckRepeat = (call) => {
-      const sig = callSignature(call.name, call.arguments);
-      return recentCalls.length >= 2 && recentCalls[0].signature === sig && recentCalls[1].signature === sig;
-    };
-    if (parsed.calls.some(isStuckRepeat)) {
-      console.warn(`[Responses] Dropping tool call repeated 3+ times in a row for ${conversationKey} (loop guard).`);
-      parsed.calls = parsed.calls.filter(c => !isStuckRepeat(c));
+    // Still repeating a call that has already run or is redundant: drop it instead of feeding Codex the loop
+    const redundantCalls = findRepeatedCalls(parsed.calls, body.input);
+    if (redundantCalls.length > 0) {
+      console.warn(`[Responses] Dropping ${redundantCalls.length} redundant tool call(s) before returning to Codex (loop guard): ${redundantCalls.map(r => describeCall(r.call)).join(', ')}`);
+      const redSet = new Set(redundantCalls.map(r => r.call));
+      parsed.calls = parsed.calls.filter(c => !redSet.has(c));
     }
 
     let sanitizedClean = (parsed.cleanContent || '')
@@ -1257,6 +1369,9 @@ ${formatReminder}`;
       // Broken tool-call wrappers the model sometimes leaves behind (seen in Codex chats as bare text)
       .replace(/<\/?\s*(?:inv[\s_]*calls?|inv|call_exec|call_tool|tool_cmd|tool_calls?|invoke|function_calls?)\b[^>]*>/gi, '')
       .replace(/(?:^|\n)\s*[|｜]+\s*(?:\n|$)/g, '\n')
+      .replace(/(?:\s*[-*_]{3,}\s*){2,}/g, '\n\n---\n\n')
+      .replace(/(?:\s*[-*_]{3,}\s*)+$/g, '')
+      .replace(/^(?:\s*[-*_]{3,}\s*)+/g, '')
       .trim();
 
     // Fail-Safe: If no tools were parsed and no readable content exists, do not crash the connection

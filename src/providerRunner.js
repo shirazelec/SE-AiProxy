@@ -1,5 +1,5 @@
 import tokenPool from './tokenPool.js';
-import { detectRepetitionLoop } from './parser.js';
+import { detectRepetitionLoop, findFabricatedResult } from './parser.js';
 import { upstreamFetch } from './directFetch.js';
 import { PROVIDER_PRESETS } from './providerPresets.js';
 import { guardedFetch, guardedRead, upstreamHttpError, STREAM_STALL_TIMEOUT_MS, stallReason } from './upstreamGuard.js';
@@ -25,7 +25,7 @@ export function adaptOpenAIPayload(provider, payload) {
     delete payload.max_tokens;
   }
   if (isOpenAIReasoningModel(payload.model)) {
-    for (const k of ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias']) delete payload[k];
+    for (const k of ['temperature', 'top_p', 'presence_penalty', 'frequency_penalty', 'logit_bias', 'stop']) delete payload[k];
   }
   return payload;
 }
@@ -52,6 +52,10 @@ function createDeltaSink(name, onChunk) {
     }
     if (state.content.length > MAX_STREAM_CHARS) {
       console.warn(`[${name}] Stream length limit exceeded (${MAX_STREAM_CHARS} chars). Halting stream.`);
+      return true;
+    }
+    if (findFabricatedResult(state.content) !== -1) {
+      console.warn(`[${name}] Fake tool result detected in stream. Halting stream immediately to preserve response.`);
       return true;
     }
     if (state.content.length - state.lastCheck >= 80) {
@@ -204,7 +208,9 @@ export async function streamOpenAIChatAsResponsesChunks({ provider, prompt, sign
     model: provider.model,
     messages: [{ role: 'user', content: effectivePrompt }],
     stream: true,
-    max_tokens: provider.max_tokens || 16384
+    max_tokens: provider.max_tokens || 16384,
+    // OpenAI and Groq accept at most 4 stop sequences; the newline variants are covered by these
+    stop: ['[TOOL RESULT', '[COMMAND OUTPUT', '[POLL RESULT']
   });
 
   tokenPool.noteApiRequest(provider.id);

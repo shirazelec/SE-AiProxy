@@ -760,16 +760,49 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Unhandled Rejection]', reason);
 });
 
-const flushAndExit = () => {
-  tokenPool.save();
-  process.exit(0);
-};
-process.on('SIGINT', flushAndExit);
-process.on('SIGTERM', flushAndExit);
-
 const tlsCredentials = getOrCreateTlsCertificate(DATA_DIR);
-
+let httpsServer = null;
 const httpServer = http.createServer(app);
+
+let isShuttingDown = false;
+const gracefulShutdown = (signal) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);
+  try { tokenPool.save(); } catch (e) {}
+
+  let pending = 0;
+  const onClosed = () => {
+    pending--;
+    if (pending <= 0) {
+      console.log('[Server] All listeners closed cleanly.');
+      process.exit(0);
+    }
+  };
+
+  if (httpServer && httpServer.listening) {
+    pending++;
+    httpServer.close(onClosed);
+  }
+  if (httpsServer && httpsServer.listening) {
+    pending++;
+    httpsServer.close(onClosed);
+  }
+
+  if (pending === 0) {
+    process.exit(0);
+  }
+
+  // Fallback force exit after 3.5s if active connections do not close in time
+  setTimeout(() => {
+    console.warn('[Server] Graceful shutdown timeout reached. Exiting.');
+    process.exit(0);
+  }, 3500).unref();
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
 httpServer.listen(PORT, HOST, () => {
   console.log(`====================================================`);
   console.log(`  🚀 SE-AiProxy v${PROXY_VERSION} is running!`);
@@ -783,7 +816,7 @@ httpServer.listen(PORT, HOST, () => {
   console.log(`  🔐 Remote dashboard access needs the admin key (adminKey in data/config.json or ADMIN_KEY in .env)`);
   if (tlsCredentials) {
     try {
-      const httpsServer = https.createServer({
+      httpsServer = https.createServer({
         key: tlsCredentials.key,
         cert: tlsCredentials.cert
       }, app);
